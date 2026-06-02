@@ -77,7 +77,7 @@ def _patched_default_loss_fn(
     return _STATE.original_default_loss_fn(model, **inputs)
 
   raise TypeError(
-      "tunix_accel chunked CE default patch only supports Tunix decoder-only "
+      "tunix_accel CCE default patch only supports Tunix decoder-only "
       "models exposing embedder/layers/final_norm/LM-head pieces. Call "
       "uninstall(), pass "
       "fallback_to_original=True, or use trainer.with_loss_fn(...) explicitly."

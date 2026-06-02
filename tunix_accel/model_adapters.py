@@ -1,4 +1,4 @@
-"""Model adapters for chunked LM-head CE.
+"""Model adapters for Cut Cross Entropy (CCE) LM-head loss.
 
 The loss kernel is model-agnostic once it receives final hidden states and an
 LM-head kernel shaped [hidden_dim, vocab]. This module contains best-effort
@@ -94,7 +94,7 @@ def _intercepted_hidden_via_model_call(
     )
   if not getattr(model.embedder, "_tunix_accel_decode_identity", False):
     raise RuntimeError(
-        "Qwix-LoRA chunked CE models must be prepared before JIT tracing. "
+        "Qwix-LoRA CCE models must be prepared before JIT tracing. "
         "Call tunix_accel.model_adapters.prepare_intercepted_lora_model(model) "
         "before constructing/tracing the trainer, or use tunix_patch.install() "
         "before creating PeftTrainer."
@@ -162,7 +162,7 @@ def extract_lm_head_parts(
 ) -> LMHeadParts:
   """Extracts final hidden states and LM-head kernel for supported Tunix LMs."""
   if not is_supported_decoder_lm(model):
-    raise TypeError(f"Unsupported model for chunked LM-head CE: {type(model)}")
+    raise TypeError(f"Unsupported model for CCE LM-head loss: {type(model)}")
 
   if _has_lora_params(model):
     hidden = _intercepted_hidden_via_model_call(

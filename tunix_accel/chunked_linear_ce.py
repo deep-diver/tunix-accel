@@ -459,7 +459,7 @@ def lm_head_cross_entropy(
     train_lm_head: bool,
     logit_softcap: float | None = None,
 ) -> Array:
-  """Computes chunked LM-head CE with a cached custom-VJP implementation."""
+  """Computes CCE with a cached chunked/streaming LM-head implementation."""
   return make_lm_head_ce(
       token_chunk,
       train_lm_head=train_lm_head,

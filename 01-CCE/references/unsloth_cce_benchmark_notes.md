@@ -18,8 +18,9 @@ story reported by Apple CCE and Unsloth.
 - Unsloth's long-context materials report the user-visible version of the same
   improvement: lower VRAM, longer context, and no speed/accuracy degradation.
   Their 500K context write-up reports 60% lower VRAM and 3.2x longer context via
-  fused/chunked CE. Their Llama 3.3 write-up reports >75% less VRAM and 12-13x
-  longer context when CCE is combined with Unsloth gradient checkpointing.
+  fused/chunked implementations of CCE. Their Llama 3.3 write-up reports >75%
+  less VRAM and 12-13x longer context when CCE is combined with Unsloth
+  gradient checkpointing.
 
 ## What We Should Reproduce On TPU
 

@@ -1,4 +1,4 @@
-"""Drop-in Tunix loss helpers for chunked LM-head cross entropy."""
+"""Drop-in Tunix loss helpers for Cut Cross Entropy (CCE)."""
 
 from __future__ import annotations
 
@@ -15,10 +15,11 @@ def chunked_lm_head_ce_loss_fn(
     train_lm_head: bool = False,
     vocab_chunk: int = 8192,
 ):
-  """Builds a Tunix-compatible chunked LM-head CE loss.
+  """Builds a Tunix-compatible CCE loss.
 
   The returned function has the same signature expected by
-  `tunix.sft.peft_trainer.PeftTrainer.with_loss_fn`.
+  `tunix.sft.peft_trainer.PeftTrainer.with_loss_fn`. Internally, the
+  implementation streams the LM-head loss over token/vocab chunks.
   """
 
   def _loss_fn(
@@ -76,7 +77,7 @@ def use_frozen_lm_head_ce(
     token_chunk: int = 128,
     vocab_chunk: int = 8192,
 ):
-  """Applies the chunked frozen-head CE loss to a Tunix PeftTrainer.
+  """Applies the frozen-head CCE loss to a Tunix PeftTrainer.
 
   Example:
 
@@ -95,6 +96,6 @@ def use_trainable_lm_head_ce(
     token_chunk: int = 128,
     vocab_chunk: int = 8192,
 ):
-  """Applies trainable-head chunked CE to a Tunix PeftTrainer."""
+  """Applies trainable-head CCE to a Tunix PeftTrainer."""
   model_adapters.prepare_intercepted_lora_model(trainer.model)
   return trainer.with_loss_fn(trainable_lm_head_ce_loss_fn(token_chunk, vocab_chunk))

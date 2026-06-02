@@ -22,11 +22,11 @@ python -m pip install -e .
 
 When installed, the package registers a small `sitecustomize.py` hook. It waits
 for `tunix.sft.peft_trainer` to be imported, then patches Tunix's default
-decoder-LM loss for supported model families. Today that means the CCE loss
-path; future patches can live under the same package without renaming the
-project.
+decoder-LM loss for supported model families. Today that means the Cut Cross
+Entropy (CCE) loss path; future patches can live under the same package without
+renaming the project.
 
-## CCE Controls
+## Cut Cross Entropy Controls
 
 ```bash
 export TUNIX_ACCEL_CE_TOKEN_CHUNK=128
@@ -37,7 +37,7 @@ export TUNIX_ACCEL_DISABLE_AUTOPATCH=1
 Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` for a Default CE baseline. Leave it unset
 for CCE.
 
-## CCE Explicit API
+## Cut Cross Entropy Explicit API
 
 ```python
 from tunix_accel.tunix_lora_ce import use_frozen_lm_head_ce
@@ -88,6 +88,6 @@ token-valid mask as `valid_mask`.
 - Figures: `01-CCE/assets/`
 - Active packing notes: `02-PACKING/README.md`
 
-The final result: CCE reduced Gemma3 270M EN-FR b16 train-step XLA peak memory
-from 10.21 GiB to 2.21 GiB while keeping eval loss and BLEU essentially at
-parity. Same-batch CCE steps were slower.
+The final result: Cut Cross Entropy reduced Gemma3 270M EN-FR b16 train-step
+XLA peak memory from 10.21 GiB to 2.21 GiB while keeping eval loss and BLEU
+essentially at parity. Same-batch CCE steps were slower.

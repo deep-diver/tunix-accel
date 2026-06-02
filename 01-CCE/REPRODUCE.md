@@ -1,4 +1,4 @@
-# Reproducing the CCE Experiments
+# Reproducing the Cut Cross Entropy Experiments
 
 This guide records how to reproduce the final experiment family after removing
 raw intermediate artifacts and checkpoints.
@@ -25,7 +25,8 @@ checkpoint directories, old smoke runs, and intermediate profile visualizations.
 
 The patch code is kept at the repository root:
 
-- `tunix_accel/chunked_linear_ce.py`
+- `tunix_accel/chunked_linear_ce.py` - implementation module for Cut Cross
+  Entropy; the filename describes the chunked/streaming mechanism.
 - `tunix_accel/model_adapters.py`
 - `tunix_accel/tunix_lora_ce.py`
 - `tunix_accel/tunix_patch.py`
@@ -212,7 +213,7 @@ Common settings:
 Run two jobs:
 
 1. Default CE baseline with `TUNIX_ACCEL_DISABLE_AUTOPATCH=1`.
-2. CCE with autopatch enabled.
+2. Cut Cross Entropy with autopatch enabled.
 
 Save only final metrics, final generated predictions, and summary CSV/JSONL.
 Checkpoints can be deleted after evaluation.
@@ -247,4 +248,3 @@ The exact retained run showed:
 | XLA train-step peak | 10.21 GiB | 2.21 GiB |
 | Profiled step avg | 0.092 s | 0.160 s |
 | BLEU | 22.294 | 22.289 |
-

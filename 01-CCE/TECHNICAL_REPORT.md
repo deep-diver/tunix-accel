@@ -1,6 +1,6 @@
 # JAX/Tunix + TPU CCE Technical Report
 
-This report consolidates the CCE experiments we ran on JAX/Tunix + Cloud TPU. The question was simple: if we replace dense full-vocab cross entropy with chunked linear cross entropy, can we recover the kind of memory benefit Unsloth reports, while keeping loss and generation quality intact?
+This report consolidates the Cut Cross Entropy (CCE) experiments we ran on JAX/Tunix + Cloud TPU. The question was simple: if we replace dense full-vocab cross entropy with a CCE loss implementation, can we recover the kind of memory benefit Unsloth reports, while keeping loss and generation quality intact?
 
 ## Executive Summary
 
@@ -21,14 +21,14 @@ The default CE path computes the full language-model logits by multiplying hidde
 batch_size * context_length * vocab_size
 ```
 
-CCE keeps the same objective, but computes the needed log-sum-exp and target-token logit in token/vocab chunks instead of materializing the full logits matrix. In these experiments, the Tunix/Gemma3 training path was patched so the train-step loss used chunked CE while generation still used the normal decode path.
+CCE keeps the same objective, but computes the needed log-sum-exp and target-token logit without materializing the full logits matrix. In this implementation, those reductions are streamed over token/vocab chunks. The Tunix/Gemma3 training path was patched so the train-step loss used CCE while generation still used the normal decode path.
 
-As a sanity check, the early microbenchmark found that dense CE failed at the b16, seq_len 2048, Gemma3-270M-like shape, while chunked CE ran:
+As a sanity check, the early microbenchmark found that dense CE failed at the b16, seq_len 2048, Gemma3-270M-like shape, while CCE ran:
 
 | Kernel | Status | Key tensor estimate | Compile + first run | Interpretation |
 | --- | --- | --- | --- | --- |
 | naive_ce | FAILED | 32,752 MB | OOM | full vocab logits materialization |
-| chunked_ce | OK | 320 MB | 0.559 s | chunked vocab/tokens |
+| cce | OK | 320 MB | 0.559 s | streamed vocab/tokens |
 
 The small parity test produced dense CE loss 8.70297, CCE loss 8.70004, absolute loss difference 0.00293, and hidden-gradient max absolute difference 0.00261. That is not a full numerical proof, but it was enough to move from microbenchmarks to Gemma/Tunix training.
 

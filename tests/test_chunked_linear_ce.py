@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Numerical checks for frozen LM-head chunked CE."""
+"""Numerical checks for the chunked implementation of CCE."""
 
 from __future__ import annotations
 
