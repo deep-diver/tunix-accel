@@ -1,12 +1,12 @@
 # Tunix Accel
 
 This repository contains drop-in acceleration and memory-efficiency experiments
-for JAX/Tunix training. The first implemented patch is chunked linear cross
-entropy for decoder-LM SFT.
+for JAX/Tunix training.
 
 - `tunix_accel/`: reusable patch code for Tunix decoder-LM training.
 - `01-CCE/`: the final experiment report, retained summary data, figures, and
   reproduction guide.
+- `02-PACKING/`: the active padding-free / uncontaminated packing workstream.
 
 Raw TPU traces, checkpoints, smoke outputs, and intermediate reports were
 removed after the CCE result was consolidated.
@@ -24,7 +24,7 @@ decoder-LM loss for supported model families. Today that means the CCE loss
 path; future patches can live under the same package without renaming the
 project.
 
-## Controls
+## CCE Controls
 
 ```bash
 export TUNIX_ACCEL_CE_TOKEN_CHUNK=128
@@ -35,7 +35,7 @@ export TUNIX_ACCEL_DISABLE_AUTOPATCH=1
 Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` for a Default CE baseline. Leave it unset
 for CCE.
 
-## Explicit API
+## CCE Explicit API
 
 ```python
 from tunix_accel.tunix_lora_ce import use_frozen_lm_head_ce
@@ -55,12 +55,32 @@ For full fine-tuning where the LM head must receive gradients:
 from tunix_accel.tunix_lora_ce import use_trainable_lm_head_ce
 ```
 
+## Packing API
+
+```python
+from tunix_accel.packing import pack_records
+
+packed = pack_records(
+    tokenized_records,
+    max_length=2048,
+    pad_token_id=0,
+    strategy="best_fit_decreasing",
+)
+
+batch = packed.as_numpy()
+```
+
+The packed batch includes `input_ids`, `labels`, `loss_mask`, `input_mask`,
+per-segment reset `positions`, `segment_ids`, and an optional block-causal
+`attention_mask` that prevents attention leakage between packed samples.
+
 ## Final Experiment Package
 
 - Report: `01-CCE/TECHNICAL_REPORT.md`
 - Reproduction guide: `01-CCE/REPRODUCE.md`
 - Retained data: `01-CCE/data/`
 - Figures: `01-CCE/assets/`
+- Active packing notes: `02-PACKING/README.md`
 
 The final result: CCE reduced Gemma3 270M EN-FR b16 train-step XLA peak memory
 from 10.21 GiB to 2.21 GiB while keeping eval loss and BLEU essentially at
