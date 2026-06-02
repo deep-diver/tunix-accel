@@ -28,6 +28,8 @@ Core implementation:
 Tests:
 
 - `tests/test_packing.py`
+- `tests/test_packing_model_parity.py`
+- `tests/test_tunix_gemma_packing_smoke.py`
 
 The packer is model-agnostic and Tunix-light. It accepts tokenized examples and
 returns fixed-length rows with:
@@ -67,6 +69,42 @@ batch = packed.as_numpy()
 
 `batch["attention_mask"]` has shape `[batch, query, key]`. If a Tunix model path
 needs a singleton head axis, callers can expand it before feeding the trainer.
+
+For Tunix trainers, use:
+
+```python
+tunix_batch = packed.as_tunix()
+```
+
+This intentionally maps `loss_mask` to the Tunix argument named `input_mask`.
+That naming is easy to trip over: in Tunix's decoder-LM loss path, `input_mask`
+is applied to shifted next-token targets. The token-valid mask remains available
+as `valid_mask`.
+
+## Validation So Far
+
+Gemma-free validation:
+
+```bash
+python -m pytest -q tests/test_packing.py tests/test_packing_model_parity.py
+```
+
+This verifies the core invariant with a tiny JAX causal LM:
+
+- packed rows use fewer batch rows than separate examples
+- packed loss equals separate-example loss
+- replacing the block-causal mask with a plain causal mask changes the loss,
+  proving that cross-segment contamination would be observable
+
+Optional Gemma/Tunix validation:
+
+```bash
+python -m pytest -q tests/test_tunix_gemma_packing_smoke.py
+```
+
+This test skips when Tunix is not installed. In a Tunix environment, it builds a
+tiny random Gemma3 model and checks that Tunix's default decoder-LM loss matches
+between separate examples and packed examples.
 
 ## Benchmark Plan
 

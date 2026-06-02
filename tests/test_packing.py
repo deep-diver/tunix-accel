@@ -77,6 +77,11 @@ def test_pack_records_preserves_labels_and_loss_mask():
   assert packed.loss_mask == [[False, True, True, True, False, False]]
   assert packed.input_mask == [[True, True, True, True, True, False]]
 
+  tunix_batch = packed.as_tunix()
+  assert tunix_batch["input_tokens"].tolist() == packed.input_ids
+  assert tunix_batch["input_mask"].tolist() == packed.loss_mask
+  assert tunix_batch["valid_mask"].tolist() == packed.input_mask
+
 
 def test_long_example_policies():
   records = [{"input_ids": [1, 2, 3, 4, 5]}]

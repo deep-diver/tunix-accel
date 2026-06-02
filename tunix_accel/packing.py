@@ -133,6 +133,38 @@ class PackedBatch:
       result["attention_mask"] = np.asarray(self.attention_mask, dtype=np.bool_)
     return result
 
+  def as_tunix(
+      self,
+      *,
+      token_key: str = "input_tokens",
+      include_labels: bool = False,
+  ) -> dict[str, Any]:
+    """Returns arrays using the names expected by Tunix trainers.
+
+    Tunix's decoder-LM loss receives an argument named `input_mask`, but that
+    mask is applied to shifted next-token targets. For packed SFT batches this
+    should be the loss mask, not merely the token-valid mask; otherwise segment
+    boundary tokens can create an unintended cross-example loss term.
+
+    The token-valid mask is retained as `valid_mask` for callers that need it.
+    """
+    arrays = self.as_numpy()
+    if "attention_mask" not in arrays:
+      raise ValueError(
+          "PackedBatch.as_tunix() requires return_attention_mask=True."
+      )
+    result: dict[str, Any] = {
+        token_key: arrays["input_ids"],
+        "input_mask": arrays["loss_mask"],
+        "valid_mask": arrays["input_mask"],
+        "positions": arrays["positions"],
+        "segment_ids": arrays["segment_ids"],
+        "attention_mask": arrays["attention_mask"],
+    }
+    if include_labels:
+      result["labels"] = arrays["labels"]
+    return result
+
 
 @dataclass
 class _Bin:

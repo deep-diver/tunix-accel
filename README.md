@@ -68,11 +68,15 @@ packed = pack_records(
 )
 
 batch = packed.as_numpy()
+
+tunix_batch = packed.as_tunix()
 ```
 
 The packed batch includes `input_ids`, `labels`, `loss_mask`, `input_mask`,
 per-segment reset `positions`, `segment_ids`, and an optional block-causal
 `attention_mask` that prevents attention leakage between packed samples.
+`as_tunix()` maps `loss_mask` to Tunix's `input_mask` argument and keeps the
+token-valid mask as `valid_mask`.
 
 ## Final Experiment Package
 
