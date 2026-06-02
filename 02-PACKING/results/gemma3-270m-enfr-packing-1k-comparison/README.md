@@ -1,6 +1,6 @@
 # Gemma3 270M EN-FR Packing Quality Comparison
 
-This report compares Default CE Tunix SFT with sequence packing disabled and enabled. All runs use Gemma3 270M IT, LoRA rank 16, batch size 16, max length 512, and OPUS100 EN-FR. The packed runs differ only in the number of optimizer steps.
+This report compares Default CE Tunix SFT with sequence packing disabled and enabled. All runs use Gemma3 270M IT, LoRA rank 16, batch size 16, max length 512, and OPUS100 EN-FR. The optimizer-step budgets are intentionally different because packing changes how many useful target tokens each step carries.
 
 ![loss_curves](loss_curves.png)
 

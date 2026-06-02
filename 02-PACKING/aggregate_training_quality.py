@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.ticker import FixedFormatter
+from matplotlib.ticker import FixedLocator
+from matplotlib.ticker import NullFormatter
+from matplotlib.ticker import NullLocator
 import numpy as np
 
 
@@ -207,7 +212,209 @@ def plot_loss(
   return path
 
 
-def plot_metrics(summary_rows: list[dict[str, Any]], outdir: Path) -> Path:
+def format_metric_value(key: str, value: float) -> str:
+  if key == "wall_time_sec":
+    return f"{value:.0f}s"
+  if key == "mean_step_time_sec_excl_first":
+    return f"{value:.3f}s"
+  if key == "peak_memory_gb_after_train":
+    return f"{value:.2f} GB"
+  if key == "loss_tokens":
+    return f"{value / 1e6:.2f}M"
+  if key == "packing_efficiency":
+    return f"{value * 100:.1f}%"
+  if key in {
+      "valid_tokens_per_sec_excl_first",
+      "loss_tokens_per_sec_excl_first",
+  }:
+    return f"{value / 1000:.1f}k/s"
+  if key in {"bleu", "chrf"}:
+    return f"{value:.2f}"
+  return f"{value:.3f}"
+
+
+def effect_color(ratio: float, direction: str) -> str:
+  if not math.isfinite(ratio):
+    return "#6B7280"
+  neutral_low = 1 / 1.03
+  neutral_high = 1.03
+  if neutral_low <= ratio <= neutral_high:
+    return "#6B7280"
+  improved = ratio > neutral_high if direction == "higher" else ratio < neutral_low
+  return "#2E7D32" if improved else "#C46A1A"
+
+
+def plot_metric_scorecard(
+    summary_rows: list[dict[str, Any]],
+    outdir: Path,
+) -> Path:
+  baseline = summary_rows[0]
+  candidate = summary_rows[1]
+  panels = [
+      (
+          "Runtime Cost",
+          "lower is better",
+          [
+              ("wall_time_sec", "Wall time", "lower"),
+              ("mean_step_time_sec_excl_first", "Step time", "lower"),
+              ("peak_memory_gb_after_train", "Peak memory", "lower"),
+          ],
+          (0.25, 1.18),
+          [0.25, 0.5, 1.0],
+      ),
+      (
+          "Useful Work",
+          "higher is better",
+          [
+              ("loss_tokens", "Loss tokens seen", "higher"),
+              ("packing_efficiency", "Token density", "higher"),
+              ("loss_tokens_per_sec_excl_first", "Loss tokens/sec", "higher"),
+          ],
+          (0.75, 11.5),
+          [1.0, 2.0, 5.0, 10.0],
+      ),
+      (
+          "Quality",
+          "near parity is the target",
+          [
+              ("eval_loss", "Eval loss", "lower"),
+              ("bleu", "BLEU", "higher"),
+              ("chrf", "chrF", "higher"),
+          ],
+          (0.94, 1.08),
+          [0.95, 1.0, 1.08],
+      ),
+  ]
+  baseline_color = "#4C78A8"
+  fig, axes = plt.subplots(
+      1,
+      3,
+      figsize=(15.8, 5.8),
+      gridspec_kw={"width_ratios": [1.0, 1.12, 1.0]},
+  )
+  fig.suptitle(
+      f"{candidate['label']} vs {baseline['label']}",
+      fontsize=16,
+      y=0.98,
+  )
+  fig.text(
+      0.5,
+      0.925,
+      "Relative scorecard: baseline is 1.0x; small gray band marks +/-3% parity.",
+      ha="center",
+      fontsize=10,
+      color="#4B5563",
+  )
+
+  for ax, (title, subtitle, metrics, xlim, ticks) in zip(axes, panels):
+    ax.set_xscale("log")
+    ax.set_xlim(*xlim)
+    ax.axvspan(1 / 1.03, 1.03, color="#E5E7EB", alpha=0.65, zorder=0)
+    ax.axvline(1.0, color="#111827", linewidth=1.1, alpha=0.75, zorder=1)
+    y_positions = np.arange(len(metrics))[::-1]
+    for y, (key, metric_label, direction) in zip(y_positions, metrics):
+      baseline_value = float(baseline[key])
+      candidate_value = float(candidate[key])
+      ratio = candidate_value / baseline_value if baseline_value else math.nan
+      color = effect_color(ratio, direction)
+      if math.isfinite(ratio):
+        ax.hlines(
+            y,
+            min(1.0, ratio),
+            max(1.0, ratio),
+            color=color,
+            linewidth=3.2,
+            alpha=0.68,
+            zorder=2,
+        )
+        ax.scatter(
+            [ratio],
+            [y],
+            s=92,
+            color=color,
+            edgecolor="white",
+            linewidth=1.0,
+            zorder=4,
+        )
+        label_x = ratio * (1.06 if ratio >= 1 else 0.94)
+        label_x = min(max(label_x, xlim[0] * 1.04), xlim[1] / 1.04)
+        ax.text(
+            label_x,
+            y + 0.18,
+            f"{ratio:.2f}x",
+            ha="left" if ratio >= 1 else "right",
+            va="center",
+            fontsize=9,
+            fontweight="bold",
+            color=color,
+        )
+      ax.scatter(
+          [1.0],
+          [y],
+          s=54,
+          color=baseline_color,
+          edgecolor="white",
+          linewidth=0.8,
+          zorder=3,
+      )
+      ax.text(
+          xlim[0] * 1.04,
+          y - 0.28,
+          (
+              f"{format_metric_value(key, candidate_value)} vs "
+              f"{format_metric_value(key, baseline_value)}"
+          ),
+          ha="left",
+          va="center",
+          fontsize=8.4,
+          color="#6B7280",
+      )
+    ax.set_title(f"{title}\n{subtitle}", fontsize=12, pad=12)
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels([metric[1] for metric in metrics], fontsize=10)
+    ax.set_ylim(-0.65, len(metrics) - 0.45)
+    ax.xaxis.set_major_locator(FixedLocator(ticks))
+    ax.xaxis.set_major_formatter(FixedFormatter([f"{tick:g}x" for tick in ticks]))
+    ax.xaxis.set_minor_locator(NullLocator())
+    ax.xaxis.set_minor_formatter(NullFormatter())
+    ax.grid(axis="x", linestyle="--", alpha=0.25)
+    ax.tick_params(axis="y", length=0)
+    for spine in ["top", "right", "left"]:
+      ax.spines[spine].set_visible(False)
+  handles = [
+      Line2D(
+          [0],
+          [0],
+          marker="o",
+          color="none",
+          markerfacecolor=baseline_color,
+          markeredgecolor="white",
+          markersize=8,
+          label=baseline["label"],
+      ),
+      Line2D(
+          [0],
+          [0],
+          marker="o",
+          color="none",
+          markerfacecolor="#2E7D32",
+          markeredgecolor="white",
+          markersize=8,
+          label=candidate["label"],
+      ),
+  ]
+  fig.legend(handles=handles, loc="lower center", ncol=2, frameon=False)
+  fig.tight_layout(rect=(0.02, 0.08, 1, 0.9), w_pad=2.4)
+  path = outdir / "metric_bars.png"
+  fig.savefig(path, dpi=180)
+  plt.close(fig)
+  return path
+
+
+def plot_metric_small_multiples(
+    summary_rows: list[dict[str, Any]],
+    outdir: Path,
+) -> Path:
   metrics = [
       ("wall_time_sec", "Wall Time", "seconds", "{:.0f}s"),
       ("mean_step_time_sec_excl_first", "Step Time", "seconds", "{:.3f}s"),
@@ -247,6 +454,12 @@ def plot_metrics(summary_rows: list[dict[str, Any]], outdir: Path) -> Path:
   fig.savefig(path, dpi=180)
   plt.close(fig)
   return path
+
+
+def plot_metrics(summary_rows: list[dict[str, Any]], outdir: Path) -> Path:
+  if len(summary_rows) == 2:
+    return plot_metric_scorecard(summary_rows, outdir)
+  return plot_metric_small_multiples(summary_rows, outdir)
 
 
 def escape_md(value: Any) -> str:
@@ -422,8 +635,9 @@ def write_report(
       "",
       "This report compares Default CE Tunix SFT with sequence packing disabled "
       "and enabled. All runs use Gemma3 270M IT, LoRA rank 16, batch size 16, "
-      "max length 512, and OPUS100 EN-FR. The packed runs differ only in the "
-      "number of optimizer steps.",
+      "max length 512, and OPUS100 EN-FR. The optimizer-step budgets are "
+      "intentionally different because packing changes how many useful target "
+      "tokens each step carries.",
       "",
   ]
   for plot in plots:
