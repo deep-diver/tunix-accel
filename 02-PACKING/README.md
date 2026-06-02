@@ -24,6 +24,7 @@ tokens while preserving loss correctness.
 Core implementation:
 
 - `tunix_accel/packing.py`
+- `02-PACKING/run_efficiency_benchmark.py`
 
 Tests:
 
@@ -124,9 +125,37 @@ The plot set should stay simple:
 - XLA peak HBM by batch size
 - loss vs consumed tokens for packed vs unpacked
 
+## No-Model Efficiency Benchmark
+
+The first model-free benchmark has been run on 5,000 OPUS100 EN-FR training
+examples using a simple regex token-count proxy. This does not require Gemma,
+Tunix, or a TPU; it only measures sequence-length packing efficiency.
+
+Artifacts:
+
+- `02-PACKING/results/no-model/README.md`
+- `02-PACKING/results/no-model/packing_efficiency.csv`
+- `02-PACKING/results/no-model/packing_efficiency_overview.png`
+- `02-PACKING/results/no-model/packing_batch_sensitivity.png`
+
+Headline at batch 16:
+
+| Max Length | Fixed Unpacked | Dynamic Unpacked | Packed | Rows Reduction | Gain vs Fixed | Gain vs Dynamic |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 256 | 17.5% | 35.5% | 99.4% | 5.66x | 5.67x | 2.80x |
+| 512 | 8.8% | 34.5% | 99.5% | 11.26x | 11.28x | 2.88x |
+| 1024 | 4.4% | 34.4% | 99.6% | 22.52x | 22.56x | 2.90x |
+| 2048 | 2.2% | 34.4% | 99.6% | 45.05x | 45.12x | 2.90x |
+
+Interpretation: fixed max-length padding is the harsh baseline and shows why
+long-context SFT can waste almost all sequence slots on short datasets. Dynamic
+padding is a stronger baseline; packing still improved useful-token density by
+about 2.8-2.9x at batch 16 on this sample.
+
 ## Current Status
 
-This branch contains the first reusable packing implementation and local unit
-tests. It has not yet run the TPU/Tunix benchmark. The next step is wiring this
-into the Tunix data pipeline used for the Gemma3 270M EN-FR run, then producing
-the same style of before/after report we used for `01-CCE`.
+This branch contains the first reusable packing implementation, local parity
+tests, optional Gemma/Tunix smoke validation, and a no-model packing efficiency
+benchmark. The next step is wiring this into the Tunix data pipeline used for
+the Gemma3 270M EN-FR run, then measuring tokens/sec, XLA peak HBM, and loss
+parity with and without CCE.

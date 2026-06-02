@@ -1,0 +1,11 @@
+{
+  "dataset": "opus100-en-fr-simple-token-proxy",
+  "source": "Helsinki-NLP/opus-100 en-fr train split with regex token-count proxy, not Gemma tokenizer",
+  "num_examples": 5000,
+  "min_length": 14,
+  "mean_length": 45.301,
+  "median_length": 31.0,
+  "p90_length": 90.0,
+  "p99_length": 186.03076171875,
+  "max_length_observed": 769
+}
