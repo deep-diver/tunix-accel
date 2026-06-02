@@ -5,6 +5,33 @@ for Tunix SFT. The goal is to reproduce the part of the Unsloth story that does
 not come from the loss kernel itself: short examples should stop wasting most of
 the model sequence length as padding.
 
+## Executive Summary
+
+Sequence packing is now implemented as a model-agnostic data-path optimization
+for Tunix SFT, with Gemma/Tunix parity tests and TPU training runs. It composes
+with the CCE workstream because it does not patch the loss kernel: packing makes
+each fixed-shape training step contain more real examples, while CCE attacks the
+large final vocab-logits loss memory path.
+
+The result is consistent across the stack:
+
+- no-model OPUS100 EN-FR length simulation shows that fixed L512 batches waste
+  most token slots on padding
+- real Gemma tokenization preserves the same opportunity: L512 fixed unpacked
+  density is 11.5%, packed density is 99.0%
+- actual Tunix Gemma3 270M training reproduces the throughput effect: 50-step
+  loss-token throughput improves from 1,538 tok/s to 33,000 tok/s
+- the longer Gemma3 270M EN-FR comparison shows that packed 1K consumed 1.9x
+  more loss tokens than unpacked 5K while taking 30% of the wall time, with
+  BLEU/chrF in the same rough band
+- short Gemma3 1B and 4B TPU runs reproduce the same scale behavior: target
+  token throughput improves by 20.9x and 23.1x respectively while step time is
+  essentially unchanged
+
+The clean claim is therefore throughput/data-density, not model memory. Packing
+keeps the same static tensor shape, so it should not be sold as reducing model
+or logits memory. It makes the same TPU step much less empty.
+
 ## Why This Comes After CCE
 
 CCE made larger batch/context combinations trainable by attacking the full vocab
@@ -218,9 +245,10 @@ translation workload from roughly 37% dynamic-padding token density to about
 
 ## Current Status
 
-This branch contains the first reusable packing implementation, local parity
-tests, optional Gemma/Tunix smoke validation, a no-model packing efficiency
-benchmark, and a real Gemma-tokenizer packing benchmark.
+This branch contains the reusable packing implementation, local parity tests,
+optional Gemma/Tunix smoke validation, no-model and Gemma-tokenizer efficiency
+benchmarks, real Gemma3 270M quality runs, and short Gemma3 1B/4B TPU scale
+smoke runs.
 
 ## Actual Tunix Training Benchmark
 
@@ -345,3 +373,98 @@ branch scored BLEU 10.82 / chrF 39.27 for packed 1K. In other words, packing is
 validated as a throughput/data-density optimization here, but this specific
 quality run should not be presented as reproducing the stronger CCE translation
 sample quality.
+
+## 1B/4B Scale Smoke
+
+The larger-model check intentionally stays short: 50 optimizer steps, Default CE
+only, LoRA rank 16, OPUS100 EN-FR, Gemma-style instruction wrapper, and
+`TUNIX_ACCEL_DISABLE_AUTOPATCH=1`. The purpose is not final translation quality;
+it is to see whether the same useful-token throughput effect survives when the
+model is scaled from 270M to 1B and 4B.
+
+Artifacts:
+
+- `02-PACKING/results/gemma3-1b-4b-packing-smoke-comparison/README.md`
+- `02-PACKING/results/gemma3-1b-4b-packing-smoke-comparison/loss_vs_useful_tokens.png`
+- `02-PACKING/results/gemma3-1b-4b-packing-smoke-comparison/throughput_and_density.png`
+- `02-PACKING/results/gemma3-1b-4b-packing-smoke-comparison/summary.csv`
+- `02-PACKING/results/gemma3-1b-enfr-packing-smoke-b8-l512-s50/`
+- `02-PACKING/results/gemma3-4b-enfr-packing-smoke-b4-l512-s50/`
+
+![1B/4B loss vs useful tokens](results/gemma3-1b-4b-packing-smoke-comparison/loss_vs_useful_tokens.png)
+
+![1B/4B throughput and density](results/gemma3-1b-4b-packing-smoke-comparison/throughput_and_density.png)
+
+Run matrix:
+
+| Model | TPU | Chips | Batch | Max length | Steps | Variant | Density | Target tok/s | Final target tokens | Step time |
+| --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| Gemma3 1B | v5litepod-4 / `tunix-packing-1b` | 4 | 8 | 512 | 50 | unpacked | 10.5% | 403 | 4,408 | 0.219s |
+| Gemma3 1B | v5litepod-4 / `tunix-packing-1b` | 4 | 8 | 512 | 50 | packed | 99.3% | 8,437 | 92,878 | 0.219s |
+| Gemma3 4B | v5litepod-4 / `tunix-packing-4b` | 4 | 4 | 512 | 50 | unpacked | 10.5% | 199 | 2,254 | 0.224s |
+| Gemma3 4B | v5litepod-4 / `tunix-packing-4b` | 4 | 4 | 512 | 50 | packed | 99.3% | 4,615 | 51,765 | 0.224s |
+
+Ratios:
+
+| Model | Target-token throughput | Final target tokens in 50 steps | Density change | Step-time change |
+| --- | ---: | ---: | ---: | ---: |
+| Gemma3 1B | 20.9x | 21.1x | 9.5x | 1.001x |
+| Gemma3 4B | 23.1x | 23.0x | 9.5x | 0.999x |
+
+Batch-search notes on v5litepod-4:
+
+| Model | Tried condition | Result |
+| --- | --- | --- |
+| Gemma3 1B | b16, L512, 50 steps | compile OOM, XLA reported 16.48 GiB used vs 15.75 GiB HBM |
+| Gemma3 4B | b16, L512, 50 steps | compile OOM, XLA reported 28.93 GiB used vs 15.75 GiB HBM |
+| Gemma3 4B | b8, L512, 50 steps | compile OOM, XLA reported 17.25 GiB used vs 15.75 GiB HBM |
+
+These OOM observations are only batch-sizing context. They should not be used
+as evidence that packing lowers the model's memory footprint; the successful
+packed and unpacked pairs use the same static shapes, and their JAX memory
+snapshots are nearly identical. The important outcome is that the packed step
+contains far more useful target tokens.
+
+## What Is Proven
+
+Packing correctness:
+
+- packed loss matches separate-example loss in the local JAX parity test
+- segment-local positions and block-causal attention prevent cross-example
+  contamination
+- optional Gemma/Tunix smoke tests confirm the same behavior through Tunix's
+  decoder-LM loss path
+
+Training throughput:
+
+- real Tunix Gemma3 270M, 1B, and 4B runs all show nearly unchanged step time
+  and much higher target-token throughput when examples are packed
+- the effect is strongest when the dataset has short examples relative to
+  `max_length`, which is exactly the OPUS100 EN-FR instruction-tuning setup
+  used here
+
+Quality:
+
+- the Gemma3 270M packed 1K run produced BLEU/chrF in the same rough band as
+  unpacked 5K while taking much less wall time
+- this is enough to show that the training path is not obviously broken, but it
+  is not enough to claim broad quality parity for all datasets or models
+
+## What Is Not Proven
+
+Packing is not a replacement for CCE. It does not remove the final LM-head
+logits tensor and it does not directly reduce model-state memory. For long
+examples that already fill `max_length`, packing has little room to help.
+
+The current 1B/4B experiments are smoke tests, not final quality experiments.
+They demonstrate throughput scaling, not final EN-FR translation quality. A
+longer 1B or 4B quality run is only necessary if the next claim needs to be
+about output quality rather than training efficiency.
+
+## Final Read
+
+This branch gives us the second useful Unsloth-inspired primitive after CCE:
+CCE makes some high-memory training shapes feasible; packing makes short-example
+SFT stop wasting those shapes. The two patches target different failure modes,
+so the right story is not "packing vs CCE". The right story is "CCE keeps the
+loss path tractable, packing keeps the data path dense."
