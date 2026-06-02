@@ -11,10 +11,13 @@ from __future__ import annotations
 import argparse
 import csv
 from dataclasses import dataclass
+import importlib.metadata as importlib_metadata
 import json
 import math
 import os
 from pathlib import Path
+import platform
+import socket
 import sys
 import time
 from typing import Any, Iterable, Iterator
@@ -51,6 +54,21 @@ class TokenizedSftDataset:
 
 
 @dataclass(frozen=True)
+class RawTranslationDataset:
+  name: str
+  split: str
+  examples: list[dict[str, str]]
+
+
+@dataclass(frozen=True)
+class TokenizerBundle:
+  tokenizer: Any
+  encode: Any
+  pad_id: int
+  eos_id: int
+
+
+@dataclass(frozen=True)
 class PreparedVariant:
   name: str
   batches: list[dict[str, np.ndarray]]
@@ -78,7 +96,7 @@ def translation_pair(row: dict[str, Any]) -> tuple[str, str]:
   return translation["en"], translation["fr"]
 
 
-def load_tokenizer(args: argparse.Namespace):
+def load_tokenizer(args: argparse.Namespace) -> TokenizerBundle:
   if args.tokenizer_source == "sentencepiece":
     from tunix.models.gemma3 import params as gemma3_params  # pylint: disable=import-outside-toplevel
 
@@ -91,7 +109,12 @@ def load_tokenizer(args: argparse.Namespace):
     def encode(text: str) -> list[int]:
       return [int(x) for x in tokenizer.EncodeAsIds(text)]
 
-    return encode, pad_id, eos_id
+    return TokenizerBundle(
+        tokenizer=tokenizer,
+        encode=encode,
+        pad_id=pad_id,
+        eos_id=eos_id,
+    )
 
   if args.tokenizer_source == "huggingface":
     from transformers import AutoTokenizer  # pylint: disable=import-outside-toplevel
@@ -110,7 +133,12 @@ def load_tokenizer(args: argparse.Namespace):
     def encode(text: str) -> list[int]:
       return [int(x) for x in tokenizer(text, add_special_tokens=False)["input_ids"]]
 
-    return encode, int(pad_id), int(eos_id)
+    return TokenizerBundle(
+        tokenizer=tokenizer,
+        encode=encode,
+        pad_id=int(pad_id),
+        eos_id=int(eos_id),
+    )
 
   raise ValueError(f"Unsupported tokenizer source: {args.tokenizer_source!r}")
 
@@ -142,10 +170,13 @@ def tokenize_sft_record(
   }
 
 
-def load_opus100_records(args: argparse.Namespace) -> TokenizedSftDataset:
+def load_opus100_records(
+    args: argparse.Namespace,
+    tokenizer_bundle: TokenizerBundle | None = None,
+) -> TokenizedSftDataset:
   from datasets import load_dataset  # pylint: disable=import-outside-toplevel
 
-  encode, pad_id, eos_id = load_tokenizer(args)
+  tokenizer_bundle = tokenizer_bundle or load_tokenizer(args)
   dataset = load_dataset(
       "Helsinki-NLP/opus-100",
       "en-fr",
@@ -156,8 +187,8 @@ def load_opus100_records(args: argparse.Namespace) -> TokenizedSftDataset:
     source, target = translation_pair(row)
     records.append(
         tokenize_sft_record(
-            encode=encode,
-            eos_id=eos_id,
+            encode=tokenizer_bundle.encode,
+            eos_id=tokenizer_bundle.eos_id,
             source=source,
             target=target,
             example_id=idx,
@@ -168,12 +199,79 @@ def load_opus100_records(args: argparse.Namespace) -> TokenizedSftDataset:
       name="opus100-en-fr-gemma3-it",
       model_id=args.model_id,
       tokenizer_source=args.tokenizer_source,
-      pad_token_id=pad_id,
+      pad_token_id=tokenizer_bundle.pad_id,
       records=records,
       source=(
           "Helsinki-NLP/opus-100 en-fr train split, Tunix Gemma3 IT prompt "
           "wrapper, target-only loss mask, target EOS"
       ),
+  )
+
+
+def load_raw_translation_examples(
+    *,
+    split: str,
+    num_examples: int,
+) -> RawTranslationDataset:
+  from datasets import load_dataset  # pylint: disable=import-outside-toplevel
+
+  dataset = load_dataset(
+      "Helsinki-NLP/opus-100",
+      "en-fr",
+      split=f"{split}[:{num_examples}]",
+  )
+  examples = []
+  for row in dataset:
+    source, target = translation_pair(row)
+    examples.append({"source": source, "reference": target})
+  return RawTranslationDataset(
+      name="opus100-en-fr",
+      split=split,
+      examples=examples,
+  )
+
+
+def tokenize_raw_examples(
+    examples: RawTranslationDataset,
+    *,
+    encode,
+    eos_id: int,
+) -> list[dict[str, Any]]:
+  return [
+      tokenize_sft_record(
+          encode=encode,
+          eos_id=eos_id,
+          source=example["source"],
+          target=example["reference"],
+          example_id=idx,
+      )
+      for idx, example in enumerate(examples.examples)
+  ]
+
+
+def select_generation_examples(
+    examples: RawTranslationDataset,
+    *,
+    encode,
+    max_prompt_length: int,
+    num_examples: int,
+) -> RawTranslationDataset:
+  selected = []
+  for example in examples.examples:
+    prompt_length = len(encode(gemma_generation_prompt(example["source"])))
+    if prompt_length > max_prompt_length:
+      continue
+    selected.append({
+        "source": example["source"],
+        "reference": example["reference"],
+        "prompt_tokens": str(prompt_length),
+    })
+    if len(selected) >= num_examples:
+      break
+  return RawTranslationDataset(
+      name=examples.name,
+      split=examples.split,
+      examples=selected,
   )
 
 
@@ -434,7 +532,9 @@ def create_trainer(model, args: argparse.Namespace, run_dir: Path):
   config = peft_trainer.TrainingConfig(
       eval_every_n_steps=max(args.max_steps + 1, 1),
       max_steps=args.max_steps,
-      checkpoint_root_directory=None,
+      checkpoint_root_directory=str(run_dir / "checkpoints")
+      if args.save_checkpoints
+      else None,
       metrics_logging_options=None,
       data_sharding_axis=("fsdp",),
       max_inflight_computations=args.max_inflight,
@@ -490,7 +590,7 @@ def metric_history(logger, metric_name: str) -> list[float]:
         metric_name,
         metrics_logger_lib.Mode.TRAIN,
     )
-  except ValueError:
+  except (KeyError, ValueError):
     return []
   return [float(np.asarray(value)) for value in values]
 
@@ -524,9 +624,139 @@ def device_memory_snapshot(jax) -> dict[str, Any]:
   return {"devices": snapshots, "aggregate": aggregate}
 
 
+def package_version(name: str) -> str:
+  try:
+    return importlib_metadata.version(name)
+  except importlib_metadata.PackageNotFoundError:
+    return "not-installed"
+
+
+def clean_translation(text: str) -> str:
+  text = text.strip()
+  for stop in ("<end_of_turn>", "<eos>", "</s>"):
+    if stop in text:
+      text = text.split(stop, 1)[0]
+  return text.strip()
+
+
+def compute_eval_loss(
+    trainer,
+    prepared_eval: PreparedVariant,
+    *,
+    max_batches: int,
+) -> dict[str, Any]:
+  from tunix.sft import metrics_logger as metrics_logger_lib  # pylint: disable=import-outside-toplevel
+
+  _, eval_step = trainer.jit_train_and_eval_step(
+      skip_jit=False,
+      cache_nnx_graph=True,
+  )
+  eval_batches = prepared_eval.batches[:max_batches]
+  if not eval_batches:
+    return {"eval_loss": math.nan, "eval_batches": 0}
+  try:
+    existing_values = trainer.metrics_logger.get_metric_history(
+        "",
+        "loss",
+        metrics_logger_lib.Mode.EVAL,
+    )
+    before = len(existing_values)
+  except (KeyError, ValueError):
+    before = 0
+  trainer._run_eval(eval_batches, eval_step)  # pylint: disable=protected-access
+  try:
+    values = trainer.metrics_logger.get_metric_history(
+        "",
+        "loss",
+        metrics_logger_lib.Mode.EVAL,
+    )
+  except (KeyError, ValueError):
+    return {"eval_loss": math.nan, "eval_batches": len(eval_batches)}
+  new_values = [float(np.asarray(value)) for value in values[before:]]
+  if not new_values:
+    new_values = [float(np.asarray(value)) for value in values]
+  return {
+      "eval_loss": float(np.mean(new_values)),
+      "eval_batches": len(eval_batches),
+      "eval_loss_values": new_values,
+  }
+
+
+def gemma_generation_prompt(source: str) -> str:
+  return INPUT_TEMPLATE_IT["prefix"] + source + INPUT_TEMPLATE_IT["suffix"]
+
+
+def generate_translations(
+    model,
+    tokenizer,
+    examples: RawTranslationDataset,
+    args: argparse.Namespace,
+) -> list[dict[str, str]]:
+  from tunix.generate import sampler as sampler_lib  # pylint: disable=import-outside-toplevel
+
+  cache_config = sampler_lib.CacheConfig(
+      cache_size=args.max_length + args.max_generation_steps,
+      num_layers=model.config.num_layers,
+      num_kv_heads=model.config.num_kv_heads,
+      head_dim=model.config.head_dim,
+  )
+  decode_sampler = sampler_lib.Sampler(model, tokenizer, cache_config)
+  rows: list[dict[str, str]] = []
+  selected = examples.examples[: args.generation_examples]
+  for start in range(0, len(selected), args.generation_batch_size):
+    chunk = selected[start : start + args.generation_batch_size]
+    prompts = [gemma_generation_prompt(example["source"]) for example in chunk]
+    outputs = decode_sampler(
+        prompts,
+        max_generation_steps=args.max_generation_steps,
+        max_prompt_length=args.max_length,
+        temperature=0.0,
+        echo=False,
+        pad_output=False,
+    )
+    for example, prediction in zip(chunk, outputs.text):
+      rows.append({
+          "source": example["source"],
+          "reference": example["reference"],
+          "prompt_tokens": example.get("prompt_tokens", ""),
+          "prediction": clean_translation(prediction),
+      })
+  return rows
+
+
+def compute_generation_metrics(rows: list[dict[str, str]]) -> dict[str, Any]:
+  if not rows:
+    return {"bleu": math.nan, "chrf": math.nan, "num_examples": 0}
+  try:
+    import sacrebleu  # pylint: disable=import-outside-toplevel
+  except ImportError:
+    return {
+        "bleu": math.nan,
+        "chrf": math.nan,
+        "num_examples": len(rows),
+        "error": "sacrebleu is not installed",
+    }
+  predictions = [row["prediction"] for row in rows]
+  references = [row["reference"] for row in rows]
+  return {
+      "bleu": float(sacrebleu.corpus_bleu(predictions, [references]).score),
+      "chrf": float(sacrebleu.corpus_chrf(predictions, [references]).score),
+      "num_examples": len(rows),
+  }
+
+
+def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
+  path.parent.mkdir(parents=True, exist_ok=True)
+  with path.open("w") as f:
+    for row in rows:
+      f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
 def run_variant(
     prepared: PreparedVariant,
     dataset: TokenizedSftDataset,
+    tokenizer_bundle: TokenizerBundle,
+    eval_examples: RawTranslationDataset | None,
     args: argparse.Namespace,
     outdir: Path,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -539,14 +769,82 @@ def run_variant(
   with jax.set_mesh(mesh):
     model = create_model(mesh, args)
     trainer, logger = create_trainer(model, args, run_dir)
-    trainer = trainer.with_gen_model_input_fn(
-        create_gen_model_input_fn(dataset.pad_token_id)
-    )
-    memory_before_train = device_memory_snapshot(jax)
-    train_iter = cycled_batches(prepared, max_steps=args.max_steps)
-    trainer.train(train_iter, eval_ds=None, skip_jit=args.skip_jit)
-    jax.block_until_ready(np.asarray(metric_history(logger, "loss")[-1:]))
-    memory_after_train = device_memory_snapshot(jax)
+    trainer.is_managed_externally = True
+    try:
+      trainer = trainer.with_gen_model_input_fn(
+          create_gen_model_input_fn(dataset.pad_token_id)
+      )
+      memory_before_train = device_memory_snapshot(jax)
+      train_iter = cycled_batches(prepared, max_steps=args.max_steps)
+      trainer.train(train_iter, eval_ds=None, skip_jit=args.skip_jit)
+      memory_after_train = device_memory_snapshot(jax)
+      quality: dict[str, Any] = {}
+      generation_rows: list[dict[str, str]] = []
+      if not args.skip_quality_eval and eval_examples is not None:
+        eval_records = tokenize_raw_examples(
+            eval_examples,
+            encode=tokenizer_bundle.encode,
+            eos_id=tokenizer_bundle.eos_id,
+        )
+        eval_records, eval_dropped = filter_overlength(
+            eval_records,
+            max_length=args.max_length,
+        )
+        eval_batches, eval_metrics = make_unpacked_batches(
+            eval_records,
+            batch_size=args.batch_size,
+            max_length=args.max_length,
+            pad_token_id=dataset.pad_token_id,
+        )
+        prepared_eval = PreparedVariant(
+            name="eval",
+            batches=eval_batches,
+            batch_metrics=eval_metrics,
+            source_examples=len(eval_records),
+            dropped_overlength=eval_dropped,
+            packing_summary={
+                "packing_strategy": "none",
+                "source_examples": len(eval_records),
+                "packed_rows": len(eval_records),
+                "packed_rows_used": (len(eval_records) // args.batch_size)
+                * args.batch_size,
+                "packed_efficiency": np.mean(
+                    [metric["valid_ratio"] for metric in eval_metrics]
+                )
+                if eval_metrics
+                else 0.0,
+                "row_reduction_x": 1.0,
+            },
+        )
+        quality.update(
+            compute_eval_loss(
+                trainer,
+                prepared_eval,
+                max_batches=args.eval_batches,
+            )
+        )
+        generation_examples = select_generation_examples(
+            eval_examples,
+            encode=tokenizer_bundle.encode,
+            max_prompt_length=args.max_length,
+            num_examples=args.generation_examples,
+        )
+        generation_rows = generate_translations(
+            model,
+            tokenizer_bundle.tokenizer,
+            generation_examples,
+            args,
+        )
+        quality.update(compute_generation_metrics(generation_rows))
+        quality["eval_examples_requested"] = args.eval_examples
+        quality["eval_examples_fit"] = len(eval_records)
+        quality["eval_dropped_overlength"] = eval_dropped
+        quality["generation_examples_requested"] = args.generation_examples
+        quality["generation_examples_fit"] = len(generation_rows)
+        write_jsonl(run_dir / "translations.jsonl", generation_rows)
+      memory_after_quality = device_memory_snapshot(jax)
+    finally:
+      trainer.close()
   wall_time_sec = time.perf_counter() - start_wall
 
   losses = metric_history(logger, "loss")
@@ -630,9 +928,20 @@ def run_variant(
       "wall_time_sec": wall_time_sec,
       "memory_before_train": memory_before_train,
       "memory_after_train": memory_after_train,
+      "memory_after_quality": memory_after_quality,
       "mesh_shape": dict(mesh.shape),
       "jax_devices": [str(device) for device in jax.devices()],
+      "runtime": {
+          "hostname": socket.gethostname(),
+          "platform": platform.platform(),
+          "tpu_name": os.environ.get("TUNIX_ACCEL_TPU_NAME", ""),
+          "tpu_zone": os.environ.get("TUNIX_ACCEL_TPU_ZONE", ""),
+          "jax_version": getattr(jax, "__version__", "unknown"),
+          "google_tunix_version": package_version("google-tunix"),
+          "tunix_accel_version": package_version("tunix-accel"),
+      },
       "packing": prepared.packing_summary,
+      "quality": quality,
   }
   write_json(run_dir / "summary.json", summary)
   write_csv(run_dir / "history.csv", rows)
@@ -753,12 +1062,17 @@ def write_readme(
       "",
       (
           "| Variant | Steps | Batch | Max length | Fit examples | Rows/batches | "
-          "Final loss | Step time | Valid tok/s | Loss tok/s | Packing density |"
+          "Final loss | Eval loss | BLEU | chrF | Step time | Valid tok/s | "
+          "Loss tok/s | Packing density |"
       ),
-      "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+      (
+          "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
+          "---: | ---: | ---: | ---: | ---: |"
+      ),
   ])
   for summary in summaries:
     packing = summary["packing"]
+    quality = summary.get("quality", {})
     lines.append(
         "| "
         f"{summary['variant']} | "
@@ -768,6 +1082,9 @@ def write_readme(
         f"{summary['source_examples_fit']} | "
         f"{summary['prepared_batches']} | "
         f"{summary['final_loss']:.4f} | "
+        f"{float(quality.get('eval_loss', math.nan)):.4f} | "
+        f"{float(quality.get('bleu', math.nan)):.2f} | "
+        f"{float(quality.get('chrf', math.nan)):.2f} | "
         f"{summary['mean_step_time_sec_excl_first']:.3f}s | "
         f"{summary['valid_tokens_per_sec_excl_first']:.0f} | "
         f"{summary['loss_tokens_per_sec_excl_first']:.0f} | "
@@ -862,6 +1179,13 @@ def main() -> None:
   parser.add_argument("--max-inflight", type=int, default=1)
   parser.add_argument("--skip-jit", action="store_true")
   parser.add_argument("--prepare-only", action="store_true")
+  parser.add_argument("--skip-quality-eval", action="store_true")
+  parser.add_argument("--eval-examples", type=int, default=512)
+  parser.add_argument("--eval-batches", type=int, default=32)
+  parser.add_argument("--generation-examples", type=int, default=128)
+  parser.add_argument("--generation-batch-size", type=int, default=8)
+  parser.add_argument("--max-generation-steps", type=int, default=128)
+  parser.add_argument("--save-checkpoints", action="store_true")
   parser.add_argument("--log-every", type=int, default=1)
   parser.add_argument("--seed", type=int, default=0)
   parser.add_argument("--outdir", default="02-PACKING/results/gemma-training-default-ce")
@@ -878,9 +1202,16 @@ def main() -> None:
         "TUNIX_ACCEL_DISABLE_AUTOPATCH=1."
     )
 
-  outdir = Path(args.outdir)
+  outdir = Path(args.outdir).expanduser().resolve()
   outdir.mkdir(parents=True, exist_ok=True)
-  dataset = load_opus100_records(args)
+  tokenizer_bundle = load_tokenizer(args)
+  dataset = load_opus100_records(args, tokenizer_bundle)
+  eval_examples = None
+  if not args.skip_quality_eval:
+    eval_examples = load_raw_translation_examples(
+        split="validation",
+        num_examples=max(args.eval_examples, args.generation_examples * 4),
+    )
   write_json(
       outdir / "dataset_summary.json",
       {
@@ -894,6 +1225,9 @@ def main() -> None:
           "p50_length": float(np.percentile([len(r["input_ids"]) for r in dataset.records], 50)),
           "p90_length": float(np.percentile([len(r["input_ids"]) for r in dataset.records], 90)),
           "max_length": int(max(len(r["input_ids"]) for r in dataset.records)),
+          "eval_examples": len(eval_examples.examples)
+          if eval_examples is not None
+          else 0,
       },
   )
 
@@ -915,7 +1249,14 @@ def main() -> None:
   summaries: list[dict[str, Any]] = []
   histories: dict[str, list[dict[str, Any]]] = {}
   for prepared in prepared_variants:
-    summary, history = run_variant(prepared, dataset, args, outdir)
+    summary, history = run_variant(
+        prepared,
+        dataset,
+        tokenizer_bundle,
+        eval_examples,
+        args,
+        outdir,
+    )
     summaries.append(summary)
     histories[prepared.name] = history
 

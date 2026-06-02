@@ -142,3 +142,37 @@ def test_tiny_gemma_default_loss_matches_for_packed_batch():
       atol=1e-5,
       rtol=1e-5,
   )
+
+
+def test_tiny_gemma_cce_loss_matches_for_packed_batch():
+  nnx = pytest.importorskip("flax.nnx", exc_type=ImportError)
+  gemma3_model = pytest.importorskip(
+      "tunix.models.gemma3.model",
+      exc_type=ImportError,
+  )
+  peft_trainer = pytest.importorskip(
+      "tunix.sft.peft_trainer",
+      exc_type=ImportError,
+  )
+  utils = pytest.importorskip("tunix.sft.utils", exc_type=ImportError)
+  tunix_patch = pytest.importorskip(
+      "tunix_accel.tunix_patch",
+      exc_type=ImportError,
+  )
+
+  records = _records()
+  max_length = 6
+  model = _tiny_gemma(nnx, gemma3_model)
+  separate = _separate_tunix_batch(records, max_length=max_length, utils=utils)
+  packed = _packed_tunix_batch(records, max_length=max_length, utils=utils)
+
+  tunix_patch.install(token_chunk=2, vocab_chunk=32)
+  try:
+    assert jnp.allclose(
+        _default_loss(model, packed, peft_trainer),
+        _default_loss(model, separate, peft_trainer),
+        atol=1e-5,
+        rtol=1e-5,
+    )
+  finally:
+    tunix_patch.uninstall()

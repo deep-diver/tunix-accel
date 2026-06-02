@@ -6,4 +6,5 @@ datasets
 gcsfs==2026.2.0
 jax[cpu]
 matplotlib
+sacrebleu
 transformers

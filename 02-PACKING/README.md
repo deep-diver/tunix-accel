@@ -24,6 +24,7 @@ tokens while preserving loss correctness.
 Core implementation:
 
 - `tunix_accel/packing.py`
+- `tunix_accel/tunix_packing.py`
 - `02-PACKING/run_efficiency_benchmark.py`
 - `02-PACKING/run_gemma_tokenizer_benchmark.py`
 
@@ -31,6 +32,7 @@ Tests:
 
 - `tests/test_packing.py`
 - `tests/test_packing_model_parity.py`
+- `tests/test_tunix_packing.py`
 - `tests/test_tunix_gemma_packing_smoke.py`
 
 The packer is model-agnostic and Tunix-light. It accepts tokenized examples and
@@ -82,6 +84,40 @@ This intentionally maps `loss_mask` to the Tunix argument named `input_mask`.
 That naming is easy to trip over: in Tunix's decoder-LM loss path, `input_mask`
 is applied to shifted next-token targets. The token-valid mask remains available
 as `valid_mask`.
+
+## Tunix Drop-In Adapter
+
+For existing Tunix datasets that already yield padded batches, use the Tunix
+adapter instead of manually calling `pack_records`:
+
+```python
+from tunix_accel import TunixPackingConfig
+from tunix_accel import pack_tunix_batches
+from tunix_accel import packed_input_fn
+
+packing = TunixPackingConfig()
+train_ds = pack_tunix_batches(train_ds, packing)
+trainer = trainer.with_gen_model_input_fn(
+    packed_input_fn(pad_token_id=packing.pad_token_id)
+)
+trainer.train(train_ds)
+```
+
+`TunixPackingConfig()` infers `batch_size` and `max_length` from the first
+incoming batch. For the strongest drop-in form, install the process-local train
+wrapper:
+
+```python
+from tunix_accel import TunixPackingConfig
+from tunix_accel import install_packing
+
+install_packing(TunixPackingConfig())
+trainer.train(train_ds)
+```
+
+This wrapper only changes the training dataset and `gen_model_input_fn`. It does
+not patch the loss function, so it is designed to compose with the CCE patch:
+packing controls padding/attention, CCE controls the final LM-head loss memory.
 
 ## Validation So Far
 
@@ -271,3 +307,44 @@ The final loss values above are same-step results, not same-token-budget quality
 results. Packed consumed 178,077 loss tokens over 50 steps, while unpacked
 consumed 8,414. For quality parity, the next comparison should match consumed
 loss tokens or train both variants to the same validation budget.
+
+## 1K Packed Quality Comparison
+
+The follow-up TPU run compares three Default CE LoRA SFT cases on the same
+Gemma3 270M IT / OPUS100 EN-FR setup:
+
+- unpacked, 5,000 optimizer steps
+- packed, 1,000 optimizer steps
+- packed, 5,000 optimizer steps
+
+Artifacts:
+
+- `02-PACKING/results/gemma3-270m-enfr-packing-1k-comparison/README.md`
+- `02-PACKING/results/gemma3-270m-enfr-packing-1k-comparison/loss_curves.png`
+- `02-PACKING/results/gemma3-270m-enfr-packing-1k-comparison/metric_bars.png`
+- `02-PACKING/results/gemma3-270m-enfr-packing-1k-comparison/summary.csv`
+- `02-PACKING/results/gemma3-270m-enfr-packing-1k-comparison/cce_aligned_translation_samples.md`
+- `02-PACKING/results/gemma3-270m-enfr-packing-1k-comparison/cce_aligned_quality.csv`
+
+Headline result:
+
+| Run | Loss tokens | Wall time | Eval loss | BLEU | chrF | Loss tok/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Unpacked 5K | 1,753,490 | 604s | 4.204 | 13.70 | 39.68 | 3,291 |
+| Packed 1K | 3,330,580 | 181s | 4.330 | 14.19 | 40.21 | 30,966 |
+| Packed 5K | 16,621,227 | 610s | 8.425 | 7.60 | 32.81 | 31,017 |
+
+Interpretation: the packed 1K run is the useful comparison point. It consumed
+about 1.9x as many loss tokens as the unpacked 5K run while taking about 30% of
+the wall time, and the 128-sample generation metrics landed in the same band.
+The packed 5K run repeated the compacted data too many times and degraded
+validation quality, so same-step packed vs unpacked is not a fair quality
+comparison.
+
+The same 16 EN-FR samples used in `01-CCE` were also replayed for this branch.
+That stricter side-by-side is less flattering: the 01-CCE runs scored BLEU
+22.29 / chrF 50-51 on those 16 samples, while this packing-only Default CE
+branch scored BLEU 10.82 / chrF 39.27 for packed 1K. In other words, packing is
+validated as a throughput/data-density optimization here, but this specific
+quality run should not be presented as reproducing the stronger CCE translation
+sample quality.
