@@ -60,6 +60,18 @@ For full fine-tuning where the LM head must receive gradients:
 from tunix_accel.tunix_lora_ce import use_trainable_lm_head_ce
 ```
 
+## Gemma3 Tiled MLP API
+
+```python
+from tunix_accel import gemma3_tiled_mlp
+
+gemma3_tiled_mlp.install(token_chunk=256)
+```
+
+This process-local patch replaces Tunix Gemma3 `FeedForward.block` with the
+tiled gated-MLP implementation. It currently targets non-LoRA Gemma3 projection
+kernels; Qwix-LoRA projection params fall back to the original MLP by default.
+
 ## Packing API
 
 ```python

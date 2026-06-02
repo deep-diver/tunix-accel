@@ -19,7 +19,9 @@ this workstream unless Gemma3 results justify a later adapter expansion.
 Implemented:
 
 - `tunix_accel/tiled_mlp.py`
+- `tunix_accel/gemma3_tiled_mlp.py`
 - `tests/test_tiled_mlp.py`
+- `tests/test_gemma3_tiled_mlp.py`
 
 The first implementation covers SwiGLU/GeGLU-style gated MLP blocks:
 
@@ -48,17 +50,22 @@ recompute or smaller GEMMs for lower activation residency.
 
 ## Verified Locally
 
-The local environment does not currently include Tunix/Flax, so the first tests
-are Gemma-free JAX checks:
+Gemma-free JAX checks:
 
 ```bash
 python -m pytest -q tests/test_tiled_mlp.py
 ```
 
-Current result:
+Gemma3 integration checks:
+
+```bash
+python -m pytest -q tests/test_gemma3_tiled_mlp.py
+```
+
+Current combined result:
 
 ```text
-5 passed
+9 passed
 ```
 
 Covered checks:
@@ -68,6 +75,11 @@ Covered checks:
 - gradients with respect to hidden, gate, up, and down kernels
 - JIT-compiled gradient parity
 - simple dense-vs-tiled intermediate memory estimate helper
+- Tunix Gemma3 `FeedForward.block` parity
+- Tunix Gemma3 `remat_config=BLOCK` call-path parity
+- Tunix Gemma3 default SFT loss parity on a tiny random model
+- Qwix-LoRA safety behavior: fallback to the original MLP by default, strict
+  error when fallback is disabled
 
 ## API Sketch
 
@@ -90,19 +102,34 @@ For comparison and tests:
 from tunix_accel.tiled_mlp import dense_gated_mlp
 ```
 
+For Gemma3 drop-in use:
+
+```python
+from tunix_accel import gemma3_tiled_mlp
+
+gemma3_tiled_mlp.install(token_chunk=256)
+
+trainer = peft_trainer.PeftTrainer(...)
+trainer.train(...)
+
+gemma3_tiled_mlp.uninstall()
+```
+
+The patch replaces `tunix.models.gemma3.model.FeedForward.block` process-wide.
+That keeps Gemma3's original `FeedForward.__call__` path intact, including its
+existing `remat_config=BLOCK` behavior.
+
 ## Next Milestones
 
-1. Inspect actual Tunix Gemma3 MLP module structure in a Tunix-enabled
-   environment.
-2. Add a Tunix/Gemma3 adapter that swaps supported `gate_proj`, `up_proj`, and
-   `down_proj` MLP blocks to the tiled kernel.
-3. Run tiny Gemma forward/loss parity with and without the patch.
-4. Run TPU microbenchmarks:
+1. Run TPU microbenchmarks:
    - dense MLP vs tiled MLP
    - CCE vs CCE + tiled MLP
    - context frontier and XLA planned HBM
-5. Decide whether Pallas is needed. If XLA already lowers the tiled custom-VJP
+2. Decide whether Pallas is needed. If XLA already lowers the tiled custom-VJP
    path well, Pallas may not be worth the added model-family complexity.
+3. Add Qwix-LoRA-aware tiled projection support if LoRA runs become a primary
+   target. Current behavior intentionally falls back to the original MLP when
+   LoRA projection params are present.
 
 ## Known Risks
 
@@ -111,5 +138,7 @@ from tunix_accel.tiled_mlp import dense_gated_mlp
 - Drop-in replacement is more model-family-sensitive than CCE. This workstream
   intentionally starts with Gemma3 only; other families may expose different MLP
   module layouts.
+- Current tiled Gemma3 path is full-parameter/frozen-base only. Qwix-LoRA
+  projection deltas fall back to the original MLP unless strict mode is enabled.
 - XLA might already optimize some MLP patterns well enough that a handwritten
   Pallas kernel is not the first bottleneck.

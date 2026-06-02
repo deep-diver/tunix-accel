@@ -1,4 +1,5 @@
 google-tunix==0.1.6
+qwix==0.1.6
 kagglehub==0.4.3
 importlib_resources
 tensorflow
