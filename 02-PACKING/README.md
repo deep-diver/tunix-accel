@@ -184,6 +184,90 @@ translation workload from roughly 37% dynamic-padding token density to about
 
 This branch contains the first reusable packing implementation, local parity
 tests, optional Gemma/Tunix smoke validation, a no-model packing efficiency
-benchmark, and a real Gemma-tokenizer packing benchmark. The next step is
-wiring this into the Tunix data pipeline used for the Gemma3 270M EN-FR run,
-then measuring tokens/sec, XLA peak HBM, and loss parity with and without CCE.
+benchmark, and a real Gemma-tokenizer packing benchmark.
+
+## Actual Tunix Training Benchmark
+
+The real Tunix benchmark now runs `PeftTrainer` steps on Gemma3 270M LoRA SFT.
+It is intentionally a Default CE baseline; launch it with
+`TUNIX_ACCEL_DISABLE_AUTOPATCH=1` so the CCE patch is not installed.
+
+On a TPU VM, install TPU JAX explicitly rather than using the local CPU
+requirement as-is:
+
+```bash
+python -m pip install google-tunix==0.1.6 kagglehub==0.4.3 \
+  datasets matplotlib transformers importlib_resources gcsfs==2026.2.0
+python -m pip install -U "jax[tpu]" \
+  -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+python -m pip install -e .
+```
+
+```bash
+TUNIX_ACCEL_DISABLE_AUTOPATCH=1 python 02-PACKING/run_gemma_training_benchmark.py \
+  --variants unpacked,packed \
+  --batch-size 16 \
+  --max-length 512 \
+  --max-steps 50 \
+  --num-examples 5000 \
+  --outdir 02-PACKING/results/gemma-training-default-ce
+```
+
+For a cheap local data-path check that does not instantiate Gemma or Tunix:
+
+```bash
+TUNIX_ACCEL_DISABLE_AUTOPATCH=1 python 02-PACKING/run_gemma_training_benchmark.py \
+  --prepare-only \
+  --tokenizer-source huggingface \
+  --variants unpacked,packed \
+  --batch-size 16 \
+  --max-length 512 \
+  --num-examples 512 \
+  --outdir /tmp/tunix-packing-prepare-test
+```
+
+The training run writes:
+
+- per-variant `summary.json`
+- per-variant `history.csv`
+- combined `summary.json`
+- combined `history.csv`
+- `training_comparison.png`
+
+The key readouts are final loss, step time, valid tokens/sec, loss tokens/sec,
+and packed token density. This tells us whether packing improves actual Tunix
+training throughput before mixing in CCE.
+
+Artifacts from the first TPU run:
+
+- `02-PACKING/results/gemma-training-default-ce/README.md`
+- `02-PACKING/results/gemma-training-default-ce/summary.json`
+- `02-PACKING/results/gemma-training-default-ce/history.csv`
+- `02-PACKING/results/gemma-training-default-ce/training_comparison.png`
+
+Run environment:
+
+- Cloud TPU `v5litepod-1`, one TPU chip
+- Project `gcp-ml-172005`, zone `us-west4-a`
+- `google-tunix==0.1.6`, `jax==0.10.1`, `libtpu==0.0.41`
+- Model `google/gemma-3-270m-it`
+- Dataset OPUS100 EN-FR train split
+- Batch 16, max length 512, LoRA rank 16, learning rate 2e-4
+- Default CE only; CCE autopatch disabled
+
+Headline result for 50 optimizer steps:
+
+| Variant | Token density | Step time | Valid tok/s | Loss tok/s | Final loss |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Unpacked | 10.5% | 0.108s | 4,936 | 1,538 | 2.2959 |
+| Packed | 99.3% | 0.107s | 75,899 | 33,000 | 1.8844 |
+
+Interpretation: packing did not make each optimizer step materially slower in
+this small 270M setup, but each step carried far more real training tokens. That
+is the useful result for this branch: without touching CE, padding waste alone
+can dominate the amount of learning signal delivered per TPU second.
+
+The final loss values above are same-step results, not same-token-budget quality
+results. Packed consumed 178,077 loss tokens over 50 steps, while unpacked
+consumed 8,414. For quality parity, the next comparison should match consumed
+loss tokens or train both variants to the same validation budget.

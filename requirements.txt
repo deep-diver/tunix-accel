@@ -3,6 +3,7 @@ kagglehub==0.4.3
 importlib_resources
 tensorflow
 datasets
+gcsfs==2026.2.0
 jax[cpu]
 matplotlib
 transformers
