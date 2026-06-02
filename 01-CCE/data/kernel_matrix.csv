@@ -1,0 +1,9 @@
+bench,status,compile_run_s,child_wall_s,output_shape,output_dtype,key_estimate_mb,error_summary
+naive_ce,failed,,3.2935598699999957,,,32752.0,"Traceback (most recent call last):   File ""/home/deep-diver/tpu_kernel_matrix.py"", line 454, in <module>     main()   File ""/home/deep-diver/tpu_kernel_matrix.py"", line 437, in main     result = child_main(args)              ^^^^^^^^^^^^^^^^   File ""/home/deep-diver/tpu_kernel_matrix.py"", line 132, in child_main     out = run(x, w, y, mask)           ^^^^^^^^^^^^^^^^^^ jax.errors.JaxRuntimeError: RESOURCE_EXHAUSTED: E1000: CompileTimeHbmOom: XLA:TPU compile permanent error. Ran out of memory in "
+chunked_ce,ok,0.5589923959999794,3.192999871000012,[],float32,320.0,
+mlp_geglu,ok,1.3230088040000112,4.1492677889999925,"[32768, 640]",bfloat16,320.0,
+tiled_mlp_geglu,ok,0.606658565999993,3.076904495000008,"[32768, 640]",bfloat16,320.0,
+attention,ok,1.1752282840000134,3.582730362999996,"[16, 2048, 4, 256]",bfloat16,512.0,
+rope_qk,ok,0.7313586410000141,3.154092122999998,"[16, 2048, 4, 256]",bfloat16,320.0,
+rmsnorm,ok,0.3149342650000051,2.6890218070000174,"[32768, 640]",bfloat16,320.0,
+lora_projection,ok,0.7849591430000089,3.289238350000005,"[32768, 2048]",bfloat16,320.0,

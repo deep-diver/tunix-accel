@@ -1,0 +1,17 @@
+model,batch_size,variant,max_completed_context
+270M,8,default-lora,1024
+270M,8,chunked-lora,4096
+270M,16,default-lora,512
+270M,16,chunked-lora,4096
+270M,32,default-lora,0
+270M,32,chunked-lora,2048
+270M,64,default-lora,0
+270M,64,chunked-lora,1024
+1B,8,default-lora,2048
+1B,8,chunked-lora,8192
+1B,16,default-lora,1024
+1B,16,chunked-lora,4096
+1B,32,default-lora,512
+1B,32,chunked-lora,4096
+1B,64,default-lora,0
+1B,64,chunked-lora,2048
