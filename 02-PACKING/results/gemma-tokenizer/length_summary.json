@@ -1,0 +1,13 @@
+{
+  "dataset": "opus100-en-fr-gemma-tokenizer",
+  "source": "Helsinki-NLP/opus-100 en-fr train split, formatted with Gemma turn tokens and tokenized by the requested Gemma tokenizer",
+  "model_id": "google/gemma-3-270m-it",
+  "num_examples": 5000,
+  "min_length": 23,
+  "mean_length": 58.8408,
+  "median_length": 42.0,
+  "p90_length": 112.0,
+  "p99_length": 227.01000000000022,
+  "max_length_observed": 817,
+  "mean_answer_tokens": 21.9348
+}

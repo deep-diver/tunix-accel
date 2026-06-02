@@ -7,6 +7,8 @@ for JAX/Tunix training.
 - `01-CCE/`: the final experiment report, retained summary data, figures, and
   reproduction guide.
 - `02-PACKING/`: the active padding-free / uncontaminated packing workstream.
+  It includes a no-model efficiency benchmark and a Gemma-tokenizer OPUS100
+  benchmark.
 
 Raw TPU traces, checkpoints, smoke outputs, and intermediate reports were
 removed after the CCE result was consolidated.

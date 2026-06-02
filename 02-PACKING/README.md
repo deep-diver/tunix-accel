@@ -25,6 +25,7 @@ Core implementation:
 
 - `tunix_accel/packing.py`
 - `02-PACKING/run_efficiency_benchmark.py`
+- `02-PACKING/run_gemma_tokenizer_benchmark.py`
 
 Tests:
 
@@ -152,10 +153,37 @@ long-context SFT can waste almost all sequence slots on short datasets. Dynamic
 padding is a stronger baseline; packing still improved useful-token density by
 about 2.8-2.9x at batch 16 on this sample.
 
+## Gemma Tokenizer Benchmark
+
+The next benchmark uses the actual `google/gemma-3-270m-it` tokenizer and a
+Gemma-style turn format for OPUS100 EN-FR. It still does not instantiate model
+weights; the purpose is to verify that the data path and sequence lengths remain
+favorable under real Gemma tokenization.
+
+Artifacts:
+
+- `02-PACKING/results/gemma-tokenizer/README.md`
+- `02-PACKING/results/gemma-tokenizer/gemma_tokenizer_packing.csv`
+- `02-PACKING/results/gemma-tokenizer/gemma_tokenizer_packing_overview.png`
+
+Headline at batch 16:
+
+| Max Length | Fixed Unpacked | Dynamic Unpacked | Packed | Rows Reduction | Gain vs Fixed | Gain vs Dynamic |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 256 | 22.7% | 38.6% | 98.4% | 4.33x | 4.33x | 2.55x |
+| 512 | 11.5% | 37.1% | 99.0% | 8.62x | 8.63x | 2.67x |
+| 1024 | 5.7% | 36.9% | 99.4% | 17.30x | 17.33x | 2.70x |
+| 2048 | 2.9% | 36.9% | 99.8% | 34.72x | 34.78x | 2.71x |
+
+Interpretation: the real Gemma tokenizer makes examples slightly longer than the
+regex proxy, but the story remains the same. Packing turns a short-example
+translation workload from roughly 37% dynamic-padding token density to about
+99% packed density at batch 16.
+
 ## Current Status
 
 This branch contains the first reusable packing implementation, local parity
-tests, optional Gemma/Tunix smoke validation, and a no-model packing efficiency
-benchmark. The next step is wiring this into the Tunix data pipeline used for
-the Gemma3 270M EN-FR run, then measuring tokens/sec, XLA peak HBM, and loss
-parity with and without CCE.
+tests, optional Gemma/Tunix smoke validation, a no-model packing efficiency
+benchmark, and a real Gemma-tokenizer packing benchmark. The next step is
+wiring this into the Tunix data pipeline used for the Gemma3 270M EN-FR run,
+then measuring tokens/sec, XLA peak HBM, and loss parity with and without CCE.

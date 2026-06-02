@@ -5,3 +5,4 @@ tensorflow
 datasets
 jax[cpu]
 matplotlib
+transformers
