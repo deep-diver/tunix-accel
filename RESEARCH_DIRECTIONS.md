@@ -12,14 +12,18 @@ feature usable as a Tunix drop-in patch where possible.
 | --- | --- | --- |
 | `01-CCE` | Done | Replaced dense LM-head cross entropy with Cut Cross Entropy, reducing the Gemma3 270M EN-FR b16 train-step XLA peak from 10.21 GiB to 2.21 GiB with eval-loss and BLEU parity. |
 | `02-PACKING` | Done | Added uncontaminated sequence packing; on OPUS100 EN-FR it recovered padding waste and produced 20x+ useful target-token throughput in short Gemma runs. |
-| `03-TILED-MLP` | Started | Added a Gemma-free JAX custom-VJP gated-MLP prototype with dense forward/gradient/JIT parity tests. Tunix/Gemma drop-in replacement and TPU memory profiles remain open. |
+| `03-TILED-MLP` | Started | Added a Gemma-free JAX custom-VJP gated-MLP prototype with dense forward/gradient/JIT parity tests. Gemma3-only Tunix drop-in replacement and TPU memory profiles remain open. |
 
 ## 03 Active: Tiled / Fused MLP
 
+**Scope:** Gemma3-only until proven otherwise. The kernel math is generic for
+gated MLPs, but the drop-in adapter should first target Tunix Gemma3 modules and
+their `gate_proj`, `up_proj`, and `down_proj` structure.
+
 **Why it matters:** After CCE removes the full-vocab logits tensor, long-context
-training can become dominated by MLP activations and MLP backward intermediates.
-Unsloth also presents Tiled MLP as one of its major long-context memory
-optimizations.
+Gemma3 training can become dominated by MLP activations and MLP backward
+intermediates. Unsloth also presents Tiled MLP as one of its major long-context
+memory optimizations.
 
 **Implementation hypothesis:** Split the sequence dimension before the heavy
 MLP projections, run gate/up/down projections tile by tile, and use a custom VJP
@@ -39,8 +43,8 @@ bottleneck.
 
 - Tiling can add meaningful step-time overhead because one large GEMM becomes
   several smaller sequential GEMMs.
-- Model-family adapters may be needed for Gemma, Llama/Qwen-style SwiGLU, and
-  GeGLU variants.
+- The Gemma3 adapter may not generalize to Llama/Qwen-style SwiGLU or GeGLU
+  layouts without separate work.
 
 ## 04 Candidate: Fused QK RoPE
 

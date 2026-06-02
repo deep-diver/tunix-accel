@@ -1,8 +1,18 @@
 # 03 Tiled MLP
 
 This workstream targets the next Unsloth-style memory optimization after Cut
-Cross Entropy and sequence packing: reduce MLP activation/intermediate memory
-without changing the training objective.
+Cross Entropy and sequence packing: reduce Gemma3 MLP activation/intermediate
+memory without changing the training objective.
+
+## Scope
+
+The scope is **Gemma3-only** until proven otherwise.
+
+The current JAX kernel is generic for gated MLP math, but the drop-in patching
+surface should not claim broad model-family support yet. The first production
+target is Tunix Gemma3 modules exposing the familiar `gate_proj`, `up_proj`, and
+`down_proj` MLP structure. Llama, Qwen, and GeGLU variants stay out of scope for
+this workstream unless Gemma3 results justify a later adapter expansion.
 
 ## Current Status
 
@@ -32,7 +42,7 @@ especially the MLP intermediate:
 batch_size * context_length * intermediate_dim
 ```
 
-For Gemma/Llama-style gated MLPs, both `gate` and `up` projections produce large
+For Gemma3-style gated MLPs, both `gate` and `up` projections produce large
 token-by-intermediate tensors. A tiled implementation should trade extra
 recompute or smaller GEMMs for lower activation residency.
 
@@ -84,8 +94,8 @@ from tunix_accel.tiled_mlp import dense_gated_mlp
 
 1. Inspect actual Tunix Gemma3 MLP module structure in a Tunix-enabled
    environment.
-2. Add a best-effort Tunix/Gemma adapter that swaps supported `gate_proj`,
-   `up_proj`, and `down_proj` MLP blocks to the tiled kernel.
+2. Add a Tunix/Gemma3 adapter that swaps supported `gate_proj`, `up_proj`, and
+   `down_proj` MLP blocks to the tiled kernel.
 3. Run tiny Gemma forward/loss parity with and without the patch.
 4. Run TPU microbenchmarks:
    - dense MLP vs tiled MLP
@@ -98,7 +108,8 @@ from tunix_accel.tiled_mlp import dense_gated_mlp
 
 - Tiling may reduce memory but slow steps because large GEMMs become several
   smaller sequential GEMMs.
-- Drop-in replacement is more model-family-sensitive than CCE. Gemma, Llama,
-  Qwen, and GeGLU models may expose different MLP module layouts.
+- Drop-in replacement is more model-family-sensitive than CCE. This workstream
+  intentionally starts with Gemma3 only; other families may expose different MLP
+  module layouts.
 - XLA might already optimize some MLP patterns well enough that a handwritten
   Pallas kernel is not the first bottleneck.
