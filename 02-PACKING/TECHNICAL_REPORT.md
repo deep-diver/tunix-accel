@@ -49,11 +49,11 @@ The first benchmark used 5,000 OPUS100 EN-FR examples with a simple token-count
 proxy. It does not instantiate Gemma, Tunix, or TPU runtime. It only asks whether
 the length distribution is favorable for packing.
 
-![No-model packing efficiency overview.](assets/no_model_packing_efficiency_overview.png)
+![No-model packing efficiency overview.](02-PACKING/assets/no_model_packing_efficiency_overview.png)
 
 *Fixed max-length padding wastes most sequence capacity as context length grows.*
 
-![No-model batch sensitivity.](assets/no_model_packing_batch_sensitivity.png)
+![No-model batch sensitivity.](02-PACKING/assets/no_model_packing_batch_sensitivity.png)
 
 *Batch size increases the amount of wasted fixed-shape capacity for short
 examples.*
@@ -72,7 +72,7 @@ At batch 16:
 The next benchmark used the actual `google/gemma-3-270m-it` tokenizer and the
 same Gemma-style instruction wrapper used in the training runs.
 
-![Gemma tokenizer packing overview.](assets/gemma_tokenizer_packing_overview.png)
+![Gemma tokenizer packing overview.](02-PACKING/assets/gemma_tokenizer_packing_overview.png)
 
 *Real tokenization makes examples slightly longer than the proxy, but packing
 still fills almost every token slot.*
@@ -114,12 +114,12 @@ The longer run compared:
 Both used LoRA rank 16, batch 16, max length 512, learning rate 2e-4, and
 OPUS100 EN-FR.
 
-![Gemma3 270M loss curves.](assets/gemma3_270m_enfr_loss_curves.png)
+![Gemma3 270M loss curves.](02-PACKING/assets/gemma3_270m_enfr_loss_curves.png)
 
 *Loss is plotted by optimizer step and consumed target tokens. The packed run
 sees far more target tokens per step.*
 
-![Gemma3 270M metric scorecard.](assets/gemma3_270m_enfr_metric_scorecard.png)
+![Gemma3 270M metric scorecard.](02-PACKING/assets/gemma3_270m_enfr_metric_scorecard.png)
 
 *Packed 1K consumed more target tokens in much less wall time, with translation
 metrics in the same rough band.*
@@ -140,12 +140,12 @@ The larger-model check intentionally stayed short: 50 optimizer steps. The goal
 was to see whether the same packed-vs-unpacked behavior survives scaling from
 270M to 1B and 4B.
 
-![Gemma3 1B/4B loss vs useful tokens.](assets/gemma3_1b_4b_loss_vs_useful_tokens.png)
+![Gemma3 1B/4B loss vs useful tokens.](02-PACKING/assets/gemma3_1b_4b_loss_vs_useful_tokens.png)
 
 *For the same number of optimizer steps, packed runs move much farther along the
 useful-target-token axis.*
 
-![Gemma3 1B/4B throughput and density.](assets/gemma3_1b_4b_throughput_and_density.png)
+![Gemma3 1B/4B throughput and density.](02-PACKING/assets/gemma3_1b_4b_throughput_and_density.png)
 
 *The throughput gain comes from denser steps, not faster steps.*
 
