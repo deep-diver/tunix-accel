@@ -500,135 +500,12 @@ def write_samples(
   path.write_text("\n".join(lines) + "\n")
 
 
-def write_cce_aligned_samples(
-    md_path: Path,
-    csv_path: Path,
-    *,
-    cce_rows: list[dict[str, Any]],
-    samples: dict[str, list[dict[str, Any]]],
-    limit: int,
-) -> list[dict[str, Any]]:
-  by_label = {
-      label: {row.get("source", ""): row for row in rows}
-      for label, rows in samples.items()
-  }
-  fieldnames = [
-      "index",
-      "source",
-      "reference",
-      "cce_default_b16",
-      "cce_cce_b16",
-      *[f"{label}_prediction" for label in samples],
-  ]
-  csv_rows = []
-  for idx, cce_row in enumerate(cce_rows[:limit], start=1):
-    source = cce_row.get("src", "")
-    row = {
-        "index": idx,
-        "source": source,
-        "reference": cce_row.get("reference", ""),
-        "cce_default_b16": cce_row.get("predictions", {}).get("default_b16", ""),
-        "cce_cce_b16": cce_row.get("predictions", {}).get("cce_b16", ""),
-    }
-    for label, sample_by_source in by_label.items():
-      row[f"{label}_prediction"] = sample_by_source.get(source, {}).get(
-          "prediction",
-          "",
-      )
-    csv_rows.append(row)
-
-  with csv_path.open("w", newline="") as f:
-    writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator="\n")
-    writer.writeheader()
-    writer.writerows(csv_rows)
-
-  lines = [
-      "| # | Source | Reference | 01-CCE Default | 01-CCE CCE | "
-      + " | ".join(f"{label}" for label in samples)
-      + " |",
-      "| ---: | --- | --- | --- | --- | "
-      + " | ".join("---" for _ in samples)
-      + " |",
-  ]
-  for row in csv_rows:
-    cells = [
-        row["index"],
-        row["source"],
-        row["reference"],
-        row["cce_default_b16"],
-        row["cce_cce_b16"],
-        *[row[f"{label}_prediction"] for label in samples],
-    ]
-    lines.append("| " + " | ".join(escape_md(cell) for cell in cells) + " |")
-  md_path.write_text("\n".join(lines) + "\n")
-  return csv_rows
-
-
-def compute_translation_quality(
-    *,
-    predictions: list[str],
-    references: list[str],
-) -> tuple[float, float]:
-  import sacrebleu  # pylint: disable=import-outside-toplevel
-
-  bleu = sacrebleu.corpus_bleu(predictions, [references]).score
-  chrf = sacrebleu.corpus_chrf(predictions, [references]).score
-  return float(bleu), float(chrf)
-
-
-def write_cce_quality(
-    path: Path,
-    *,
-    aligned_rows: list[dict[str, Any]],
-    run_labels: list[str],
-) -> list[dict[str, Any]]:
-  references = [str(row["reference"]) for row in aligned_rows]
-  columns = [
-      ("01-CCE Default", "cce_default_b16"),
-      ("01-CCE CCE", "cce_cce_b16"),
-      *[(label, f"{label}_prediction") for label in run_labels],
-  ]
-  rows = []
-  for label, key in columns:
-    predictions = [str(row.get(key, "")) for row in aligned_rows]
-    bleu, chrf = compute_translation_quality(
-        predictions=predictions,
-        references=references,
-    )
-    rows.append({
-        "label": label,
-        "sample_count": len(aligned_rows),
-        "bleu": bleu,
-        "chrf": chrf,
-    })
-  write_csv(path, rows)
-  return rows
-
-
-def format_quality_table(rows: list[dict[str, Any]]) -> str:
-  lines = [
-      "| Run | Samples | BLEU | chrF |",
-      "| --- | ---: | ---: | ---: |",
-  ]
-  for row in rows:
-    lines.append(
-        "| "
-        f"{row['label']} | "
-        f"{row['sample_count']} | "
-        f"{float(row['bleu']):.2f} | "
-        f"{float(row['chrf']):.2f} |"
-    )
-  return "\n".join(lines)
-
-
 def write_report(
     path: Path,
     *,
     summary_rows: list[dict[str, Any]],
     plots: list[Path],
     sample_path: Path,
-    cce_sample_path: Path | None,
-    cce_quality_rows: list[dict[str, Any]] | None,
 ) -> None:
   lines = [
       "# Gemma3 270M EN-FR Packing Quality Comparison",
@@ -672,20 +549,6 @@ def write_report(
       "",
       sample_path.read_text(),
   ])
-  if cce_sample_path is not None:
-    if cce_quality_rows:
-      lines.extend([
-          "",
-          "## 01-CCE-Aligned 16-Sample Quality",
-          "",
-          format_quality_table(cce_quality_rows),
-      ])
-    lines.extend([
-        "",
-        "## Translation Samples Aligned With 01-CCE",
-        "",
-        cce_sample_path.read_text(),
-    ])
   path.write_text("\n".join(lines) + "\n")
 
 
@@ -695,7 +558,6 @@ def main() -> None:
   parser.add_argument("--unpacked-run")
   parser.add_argument("--packed-run")
   parser.add_argument("--outdir", required=True)
-  parser.add_argument("--cce-samples")
   parser.add_argument("--sample-limit", type=int, default=10)
   args = parser.parse_args()
 
@@ -741,38 +603,16 @@ def main() -> None:
   ]
   sample_path = outdir / "translation_samples.md"
   write_samples(sample_path, samples, limit=args.sample_limit)
-  cce_sample_path = None
-  cce_quality_rows = None
-  if args.cce_samples:
-    cce_rows = read_jsonl(Path(args.cce_samples), limit=args.sample_limit)
-    cce_sample_path = outdir / "cce_aligned_translation_samples.md"
-    aligned_rows = write_cce_aligned_samples(
-        cce_sample_path,
-        outdir / "cce_aligned_translation_samples.csv",
-        cce_rows=cce_rows,
-        samples=samples,
-        limit=args.sample_limit,
-    )
-    cce_quality_rows = write_cce_quality(
-        outdir / "cce_aligned_quality.csv",
-        aligned_rows=aligned_rows,
-        run_labels=list(samples.keys()),
-    )
   write_report(
       outdir / "README.md",
       summary_rows=summary_rows,
       plots=plots,
       sample_path=sample_path,
-      cce_sample_path=cce_sample_path,
-      cce_quality_rows=cce_quality_rows,
   )
   print(f"outdir={outdir}")
   for plot in plots:
     print(f"plot={plot}")
   print(f"summary={outdir / 'summary.csv'}")
-  if cce_sample_path is not None:
-    print(f"cce_samples={cce_sample_path}")
-    print(f"cce_quality={outdir / 'cce_aligned_quality.csv'}")
   print(f"report={outdir / 'README.md'}")
 
 

@@ -477,8 +477,7 @@ def write_report(
       "",
       "The memory column above is the aggregate JAX device-memory snapshot "
       "recorded after training. It is useful as a run sanity check, but it is "
-      "not the same as the XLA buffer-assignment peak used in the CCE memory "
-      "reports.",
+      "not the same as a compile-time XLA buffer-assignment peak.",
   ])
   path.write_text("\n".join(lines) + "\n")
 

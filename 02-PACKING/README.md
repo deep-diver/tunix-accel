@@ -8,10 +8,9 @@ the model sequence length as padding.
 ## Executive Summary
 
 Sequence packing is now implemented as a model-agnostic data-path optimization
-for Tunix SFT, with Gemma/Tunix parity tests and TPU training runs. It composes
-with the CCE workstream because it does not patch the loss kernel: packing makes
-each fixed-shape training step contain more real examples, while CCE attacks the
-large final vocab-logits loss memory path.
+for Tunix SFT, with Gemma/Tunix parity tests and TPU training runs. The patch
+does not change the model, optimizer, or loss formula; it changes how tokenized
+examples are arranged before they enter the ordinary Tunix SFT path.
 
 The result is consistent across the stack:
 
@@ -32,10 +31,10 @@ The clean claim is therefore throughput/data-density, not model memory. Packing
 keeps the same static tensor shape, so it should not be sold as reducing model
 or logits memory. It makes the same TPU step much less empty.
 
-## Why This Comes After CCE
+## Why Packing Matters
 
-CCE made larger batch/context combinations trainable by attacking the full vocab
-logits tensor. Packing attacks a different waste source:
+Packing attacks a very simple waste source: ordinary SFT batches often reserve
+`batch_size * max_length` token slots even when the examples are much shorter.
 
 ```text
 ordinary padded batch cost ~= batch_size * max_length_in_batch
@@ -143,8 +142,7 @@ trainer.train(train_ds)
 ```
 
 This wrapper only changes the training dataset and `gen_model_input_fn`. It does
-not patch the loss function, so it is designed to compose with the CCE patch:
-packing controls padding/attention, CCE controls the final LM-head loss memory.
+not patch the model, optimizer, or loss function.
 
 ## Validation So Far
 
@@ -180,7 +178,8 @@ The first benchmark should mirror Unsloth's cleanest packing story:
 3. Compare ordinary padded batches vs packed batches at the same `max_length`.
 4. Report valid-token ratio, tokens/sec, step time, XLA planned HBM, and loss
    curve parity.
-5. Repeat with CCE enabled and disabled so the interaction is visible.
+5. Plot loss against consumed target tokens, not only optimizer steps, because
+   packing changes how much useful training signal each step carries.
 
 The plot set should stay simple:
 
@@ -253,8 +252,9 @@ smoke runs.
 ## Actual Tunix Training Benchmark
 
 The real Tunix benchmark now runs `PeftTrainer` steps on Gemma3 270M LoRA SFT.
-It is intentionally a Default CE baseline; launch it with
-`TUNIX_ACCEL_DISABLE_AUTOPATCH=1` so the CCE patch is not installed.
+It uses Tunix's ordinary decoder-LM loss path. Launch it with
+`TUNIX_ACCEL_DISABLE_AUTOPATCH=1` so repository-level autopatches are disabled
+for this isolated packing benchmark.
 
 On a TPU VM, install TPU JAX explicitly rather than using the local CPU
 requirement as-is:
@@ -300,7 +300,7 @@ The training run writes:
 
 The key readouts are final loss, step time, valid tokens/sec, loss tokens/sec,
 and packed token density. This tells us whether packing improves actual Tunix
-training throughput before mixing in CCE.
+training throughput.
 
 Artifacts from the first TPU run:
 
@@ -317,7 +317,7 @@ Run environment:
 - Model `google/gemma-3-270m-it`
 - Dataset OPUS100 EN-FR train split
 - Batch 16, max length 512, LoRA rank 16, learning rate 2e-4
-- Default CE only; CCE autopatch disabled
+- ordinary Tunix decoder-LM loss path; repository autopatches disabled
 
 Headline result for 50 optimizer steps:
 
@@ -338,8 +338,8 @@ loss tokens or train both variants to the same validation budget.
 
 ## 1K Packed Quality Comparison
 
-The follow-up TPU run compares two Default CE LoRA SFT cases on the same
-Gemma3 270M IT / OPUS100 EN-FR setup:
+The follow-up TPU run compares two LoRA SFT cases on the same Gemma3 270M IT /
+OPUS100 EN-FR setup:
 
 - unpacked, 5,000 optimizer steps
 - packed, 1,000 optimizer steps
@@ -350,8 +350,6 @@ Artifacts:
 - `02-PACKING/results/gemma3-270m-enfr-packing-1k-comparison/loss_curves.png`
 - `02-PACKING/results/gemma3-270m-enfr-packing-1k-comparison/metric_bars.png`
 - `02-PACKING/results/gemma3-270m-enfr-packing-1k-comparison/summary.csv`
-- `02-PACKING/results/gemma3-270m-enfr-packing-1k-comparison/cce_aligned_translation_samples.md`
-- `02-PACKING/results/gemma3-270m-enfr-packing-1k-comparison/cce_aligned_quality.csv`
 
 Headline result:
 
@@ -366,18 +364,15 @@ generation metrics landed in the same band. Same-step packed vs unpacked is not
 a fair quality comparison because packing changes how many useful target tokens
 each optimizer step sees.
 
-The same 16 EN-FR samples used in `01-CCE` were also replayed for this branch.
-That stricter side-by-side is less flattering: the 01-CCE runs scored BLEU
-22.29 / chrF 50-51 on those 16 samples, while this packing-only Default CE
-branch scored BLEU 10.82 / chrF 39.27 for packed 1K. In other words, packing is
-validated as a throughput/data-density optimization here, but this specific
-quality run should not be presented as reproducing the stronger CCE translation
-sample quality.
+The translation samples are intentionally included as a sanity check rather than
+as a polished model-quality claim. The result supports the data-density story:
+packing delivered much more training signal per wall-clock second without an
+obvious breakage in the SFT path.
 
 ## 1B/4B Scale Smoke
 
-The larger-model check intentionally stays short: 50 optimizer steps, Default CE
-only, LoRA rank 16, OPUS100 EN-FR, Gemma-style instruction wrapper, and
+The larger-model check intentionally stays short: 50 optimizer steps, LoRA rank
+16, OPUS100 EN-FR, Gemma-style instruction wrapper, and
 `TUNIX_ACCEL_DISABLE_AUTOPATCH=1`. The purpose is not final translation quality;
 it is to see whether the same useful-token throughput effect survives when the
 model is scaled from 270M to 1B and 4B.
@@ -452,9 +447,9 @@ Quality:
 
 ## What Is Not Proven
 
-Packing is not a replacement for CCE. It does not remove the final LM-head
-logits tensor and it does not directly reduce model-state memory. For long
-examples that already fill `max_length`, packing has little room to help.
+Packing does not remove the final LM-head logits tensor and it does not directly
+reduce model-state memory. For long examples that already fill `max_length`,
+packing has little room to help.
 
 The current 1B/4B experiments are smoke tests, not final quality experiments.
 They demonstrate throughput scaling, not final EN-FR translation quality. A
@@ -463,8 +458,6 @@ about output quality rather than training efficiency.
 
 ## Final Read
 
-This branch gives us the second useful Unsloth-inspired primitive after CCE:
-CCE makes some high-memory training shapes feasible; packing makes short-example
-SFT stop wasting those shapes. The two patches target different failure modes,
-so the right story is not "packing vs CCE". The right story is "CCE keeps the
-loss path tractable, packing keeps the data path dense."
+This branch gives us a clean Unsloth-inspired packing primitive for Tunix:
+short-example SFT should not spend most of its sequence capacity on padding.
+The claim is narrow, but useful: packing keeps the data path dense.

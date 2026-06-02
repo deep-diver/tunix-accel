@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Actual Tunix/Gemma training benchmark for sequence packing.
 
-This script intentionally runs the Default CE path. Set
-TUNIX_ACCEL_DISABLE_AUTOPATCH=1 before launching Python so the repository's
-sitecustomize hook cannot install the CCE patch at interpreter startup.
+Set TUNIX_ACCEL_DISABLE_AUTOPATCH=1 before launching Python so this benchmark
+stays focused on sequence packing and does not pick up repository-level
+autopatches at interpreter startup.
 """
 
 from __future__ import annotations
@@ -1198,7 +1198,8 @@ def main() -> None:
       "on",
   }:
     raise RuntimeError(
-        "This benchmark is the Default CE baseline. Launch with "
+        "This benchmark should run with repository autopatches disabled. Launch "
+        "with "
         "TUNIX_ACCEL_DISABLE_AUTOPATCH=1."
     )
 

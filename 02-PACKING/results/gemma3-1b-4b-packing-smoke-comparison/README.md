@@ -42,4 +42,4 @@ That changes the unit economics of training. In 50 steps, Gemma3 1B processed ab
 
 This is still a smoke test, not a final quality claim. It is enough to justify the next long run only if we care about final output quality for 1B or 4B; for throughput behavior, the effect is already clear.
 
-The memory column above is the aggregate JAX device-memory snapshot recorded after training. It is useful as a run sanity check, but it is not the same as the XLA buffer-assignment peak used in the CCE memory reports.
+The memory column above is the aggregate JAX device-memory snapshot recorded after training. It is useful as a run sanity check, but it is not the same as a compile-time XLA buffer-assignment peak.
