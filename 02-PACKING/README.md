@@ -310,12 +310,11 @@ loss tokens or train both variants to the same validation budget.
 
 ## 1K Packed Quality Comparison
 
-The follow-up TPU run compares three Default CE LoRA SFT cases on the same
+The follow-up TPU run compares two Default CE LoRA SFT cases on the same
 Gemma3 270M IT / OPUS100 EN-FR setup:
 
 - unpacked, 5,000 optimizer steps
 - packed, 1,000 optimizer steps
-- packed, 5,000 optimizer steps
 
 Artifacts:
 
@@ -332,14 +331,12 @@ Headline result:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Unpacked 5K | 1,753,490 | 604s | 4.204 | 13.70 | 39.68 | 3,291 |
 | Packed 1K | 3,330,580 | 181s | 4.330 | 14.19 | 40.21 | 30,966 |
-| Packed 5K | 16,621,227 | 610s | 8.425 | 7.60 | 32.81 | 31,017 |
 
-Interpretation: the packed 1K run is the useful comparison point. It consumed
-about 1.9x as many loss tokens as the unpacked 5K run while taking about 30% of
-the wall time, and the 128-sample generation metrics landed in the same band.
-The packed 5K run repeated the compacted data too many times and degraded
-validation quality, so same-step packed vs unpacked is not a fair quality
-comparison.
+Interpretation: the packed 1K run consumed about 1.9x as many loss tokens as
+the unpacked 5K run while taking about 30% of the wall time, and the 128-sample
+generation metrics landed in the same band. Same-step packed vs unpacked is not
+a fair quality comparison because packing changes how many useful target tokens
+each optimizer step sees.
 
 The same 16 EN-FR samples used in `01-CCE` were also replayed for this branch.
 That stricter side-by-side is less flattering: the 01-CCE runs scored BLEU
