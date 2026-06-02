@@ -9,6 +9,8 @@ for JAX/Tunix training.
 - `02-PACKING/`: the active padding-free / uncontaminated packing workstream.
   It includes a no-model efficiency benchmark and a Gemma-tokenizer OPUS100
   benchmark.
+- `03-TILED-MLP/`: the active tiled gated-MLP workstream. It currently contains
+  a Gemma-free JAX custom-VJP prototype with forward/gradient parity tests.
 
 Raw TPU traces, checkpoints, smoke outputs, and intermediate reports were
 removed after the CCE result was consolidated.
@@ -87,6 +89,8 @@ token-valid mask as `valid_mask`.
 - Retained data: `01-CCE/data/`
 - Figures: `01-CCE/assets/`
 - Active packing notes: `02-PACKING/README.md`
+- Active tiled MLP notes: `03-TILED-MLP/README.md`
+- Follow-up research directions: `RESEARCH_DIRECTIONS.md`
 
 The final result: Cut Cross Entropy reduced Gemma3 270M EN-FR b16 train-step
 XLA peak memory from 10.21 GiB to 2.21 GiB while keeping eval loss and BLEU
