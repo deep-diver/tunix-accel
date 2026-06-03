@@ -1,0 +1,534 @@
+{
+  "variant": "default",
+  "default_ce": true,
+  "model_id": "google/gemma-3-4b-it",
+  "model_source": "gcs",
+  "model_path": "gs://gemma-data/checkpoints/gemma3-4b-it",
+  "tokenizer_source": "sentencepiece",
+  "batch_size": 1,
+  "max_length": 2048,
+  "max_steps_requested": 5,
+  "steps_recorded": 5,
+  "learning_rate": 0.0002,
+  "lora_rank": 16,
+  "lora_alpha": 32.0,
+  "lora_module_path": ".*(q_einsum|kv_einsum|qkv_einsum|attn_vec_einsum|gate_proj|up_proj|down_proj).*",
+  "source_examples_loaded": 64,
+  "source_examples_fit": 64,
+  "dropped_overlength": 0,
+  "prepared_batches": 64,
+  "repeats_data": false,
+  "final_loss": 6.4697265625,
+  "mean_loss": 3.113375020027161,
+  "mean_step_time_sec_excl_first": 0.26631161925001834,
+  "valid_tokens_per_sec_excl_first": 152.07748018676511,
+  "loss_tokens_per_sec_excl_first": 54.447492906372695,
+  "wall_time_sec": 107.14334826899994,
+  "memory_before_train": {
+    "devices": [
+      {
+        "device": "TPU_0(process=0,(0,0,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 1105713152,
+        "peak_bytes_in_use": 1189471232,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_1(process=0,(1,0,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 1105713152,
+        "peak_bytes_in_use": 1189471232,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_2(process=0,(0,1,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 1105713152,
+        "peak_bytes_in_use": 1189471232,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_3(process=0,(1,1,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 1105713152,
+        "peak_bytes_in_use": 1189471232,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_4(process=0,(0,2,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 1105713152,
+        "peak_bytes_in_use": 1189471232,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_5(process=0,(1,2,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 1105713152,
+        "peak_bytes_in_use": 1189471232,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_6(process=0,(0,3,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 1105713152,
+        "peak_bytes_in_use": 1189471232,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_7(process=0,(1,3,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 1105713152,
+        "peak_bytes_in_use": 1189471232,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      }
+    ],
+    "aggregate": {
+      "bytes_in_use": 8845705216,
+      "peak_bytes_in_use": 9515769856,
+      "bytes_limit": 135274659840
+    }
+  },
+  "memory_after_train": {
+    "devices": [
+      {
+        "device": "TPU_0(process=0,(0,0,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2471530496,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_1(process=0,(1,0,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2478108672,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_2(process=0,(0,1,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2486378496,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_3(process=0,(1,1,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2485055488,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_4(process=0,(0,2,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2464309248,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_5(process=0,(1,2,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2464290816,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_6(process=0,(0,3,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2471530496,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_7(process=0,(1,3,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2478436352,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      }
+    ],
+    "aggregate": {
+      "bytes_in_use": 19799640064,
+      "peak_bytes_in_use": 21255487488,
+      "bytes_limit": 135274659840
+    }
+  },
+  "memory_after_quality": {
+    "devices": [
+      {
+        "device": "TPU_0(process=0,(0,0,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2462895104,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_1(process=0,(1,0,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2464290816,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_2(process=0,(0,1,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2464636928,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_3(process=0,(1,1,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2464309248,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_4(process=0,(0,2,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2461572096,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_5(process=0,(1,2,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2460118016,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_6(process=0,(0,3,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2464283648,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      },
+      {
+        "device": "TPU_7(process=0,(1,3,0,0))",
+        "platform": "tpu",
+        "bytes_in_use": 2464303104,
+        "peak_bytes_in_use": 2656935936,
+        "bytes_limit": 16909332480,
+        "raw_keys": [
+          "bytes_in_use",
+          "bytes_limit",
+          "bytes_reservable_limit",
+          "bytes_reserved",
+          "largest_alloc_size",
+          "largest_free_block_bytes",
+          "num_allocs",
+          "peak_bytes_in_use",
+          "peak_bytes_reserved"
+        ]
+      }
+    ],
+    "aggregate": {
+      "bytes_in_use": 19706408960,
+      "peak_bytes_in_use": 21255487488,
+      "bytes_limit": 135274659840
+    }
+  },
+  "mesh_shape": {
+    "fsdp": 8,
+    "tp": 1
+  },
+  "jax_devices": [
+    "TPU_0(process=0,(0,0,0,0))",
+    "TPU_1(process=0,(1,0,0,0))",
+    "TPU_2(process=0,(0,1,0,0))",
+    "TPU_3(process=0,(1,1,0,0))",
+    "TPU_4(process=0,(0,2,0,0))",
+    "TPU_5(process=0,(1,2,0,0))",
+    "TPU_6(process=0,(0,3,0,0))",
+    "TPU_7(process=0,(1,3,0,0))"
+  ],
+  "runtime": {
+    "hostname": "t1v-n-e4c83e41-w-0",
+    "platform": "Linux-5.19.0-1022-gcp-x86_64-with-glibc2.35",
+    "tpu_name": "tunix-tiled-4b-lora",
+    "tpu_zone": "us-west4-a",
+    "jax_version": "0.10.1",
+    "google_tunix_version": "0.1.6",
+    "tunix_accel_version": "0.1.0"
+  },
+  "packing": {
+    "packing_strategy": "none",
+    "source_examples": 64,
+    "packed_rows": 64,
+    "packed_rows_used": 64,
+    "packed_efficiency": 0.017822265625,
+    "row_reduction_x": 1.0
+  },
+  "quality": {},
+  "mlp_variant": "default",
+  "input_variant": "unpacked",
+  "ce_disabled": true,
+  "drop_in_path": "sitecustomize/autopatch",
+  "explicit_install_called": false,
+  "tiled_mlp_expected": false,
+  "tiled_mlp_installed": false,
+  "tiled_mlp_token_chunk": 128,
+  "training_mode": "lora",
+  "env": {
+    "TUNIX_ACCEL_DISABLE_AUTOPATCH": "",
+    "TUNIX_ACCEL_DISABLE_CE": "1",
+    "TUNIX_ACCEL_DISABLE_TILED_MLP": "1",
+    "TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK": "128",
+    "TUNIX_ACCEL_TILED_MLP_LORA_ALPHA": "32.0"
+  }
+}

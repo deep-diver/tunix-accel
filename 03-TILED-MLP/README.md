@@ -1,167 +1,99 @@
-# 03 Tiled MLP
+# 03-TILED-MLP
 
-This workstream targets the next Unsloth-style memory optimization after Cut
-Cross Entropy and sequence packing: reduce Gemma3 MLP activation/intermediate
-memory without changing the training objective.
+This directory contains the final artifacts for the Gemma3 tiled-MLP
+experiment.
 
-## Scope
+## Contents
 
-The scope is **Gemma3-only** until proven otherwise.
+- `TECHNICAL_REPORT.md`: final narrative report with embedded plots.
+- `REPRODUCE.md`: guide for reproducing the experiment family.
+- `assets/`: final plots used by the report.
+- `data/`: compact CSV/JSON/Markdown summaries retained from the experiments.
+- `data/raw/`: raw summary, history, translation, and XLA-report records for the
+  final retained runs.
+- `references/`: background notes used to frame the benchmark story.
+- `run_gemma_training_benchmark.py`: TPU training runner for Default MLP vs
+  Tiled MLP comparisons.
+- `run_gemma3_tiled_mlp_parity.py`: same-model parity runner for Gemma3.
 
-The current JAX kernel is generic for gated MLP math, but the drop-in patching
-surface should not claim broad model-family support yet. The first production
-target is Tunix Gemma3 modules exposing the familiar `gate_proj`, `up_proj`, and
-`down_proj` MLP structure. Llama, Qwen, and GeGLU variants stay out of scope for
-this workstream unless Gemma3 results justify a later adapter expansion.
+Intermediate result folders, old plot attempts, checkpoint directories, and TPU
+logs are not part of the final package. They were useful while debugging, but
+the retained CSV/JSON records are enough to read the result and reproduce the
+setup.
 
-## Current Status
+The patch implementation itself lives outside this directory in `tunix_accel/`.
 
-Implemented:
+## Summary
 
-- `tunix_accel/tiled_mlp.py`
-- `tunix_accel/gemma3_tiled_mlp.py`
-- `tests/test_tiled_mlp.py`
-- `tests/test_gemma3_tiled_mlp.py`
-
-The first implementation covers SwiGLU/GeGLU-style gated MLP blocks:
+Tiled MLP targets the large gated-MLP intermediate in Gemma3 decoder blocks:
 
 ```text
 output = (activation(x @ gate) * (x @ up)) @ down
 ```
 
-The tiled path streams the token dimension and uses a custom VJP. During
-backward it recomputes each tile's gate/up/intermediate activations instead of
-depending on a full `[tokens, intermediate_dim]` activation tensor from the
-forward pass.
+The implementation streams the token dimension and uses a custom VJP. Backward
+recomputes each token tile's gate/up/intermediate activations instead of relying
+on one full resident `[tokens, intermediate_dim]` activation tensor.
 
-## Why This Is the 03 Target
+The current scope is deliberately **Gemma3-only**. The generic math kernel can
+express other gated MLPs, but the drop-in patching surface is tied to Tunix
+Gemma3's `FeedForward.block` layout.
 
-CCE removes the full-vocab loss logits tensor. Once that pressure is reduced,
-long-context training can move the peak toward transformer-block activations,
-especially the MLP intermediate:
+## Headline Result
 
-```text
-batch_size * context_length * intermediate_dim
-```
+On Gemma3 4B LoRA, batch 1, max length 4096, TPU v5litepod-8:
 
-For Gemma3-style gated MLPs, both `gate` and `up` projections produce large
-token-by-intermediate tensors. A tiled implementation should trade extra
-recompute or smaller GEMMs for lower activation residency.
+| Variant | Status | XLA planned HBM, aggregate |
+| --- | --- | ---: |
+| Default MLP | compile OOM | 161.5 GiB |
+| Tiled MLP | OK | 116.4 GiB |
 
-## Verified Locally
+At the same 2048 context pressure point, XLA planned HBM moved from 82.9 GiB to
+56.5 GiB aggregate. In the 500-step OPUS100 EN-FR smoke run at length 2048,
+runtime peak memory moved from 21.29 GiB to 17.92 GiB aggregate, while mean step
+time increased by about 12.6%.
 
-Gemma-free JAX checks:
+See `TECHNICAL_REPORT.md` for the full interpretation.
 
-```bash
-python -m pytest -q tests/test_tiled_mlp.py
-```
+## Drop-In Controls
 
-Gemma3 integration checks:
-
-```bash
-python -m pytest -q tests/test_gemma3_tiled_mlp.py
-```
-
-Current combined result:
-
-```text
-9 passed
-```
-
-Covered checks:
-
-- forward parity against dense MLP for `silu`, `gelu`, `gelu_approx`, and
-  `relu`
-- gradients with respect to hidden, gate, up, and down kernels
-- JIT-compiled gradient parity
-- simple dense-vs-tiled intermediate memory estimate helper
-- Tunix Gemma3 `FeedForward.block` parity
-- Tunix Gemma3 `remat_config=BLOCK` call-path parity
-- Tunix Gemma3 default SFT loss parity on a tiny random model
-- Qwix-LoRA safety behavior: fallback to the original MLP by default, strict
-  error when fallback is disabled
-
-## API Sketch
-
-```python
-from tunix_accel.tiled_mlp import tiled_gated_mlp
-
-out = tiled_gated_mlp(
-    hidden,
-    gate_kernel,
-    up_kernel,
-    down_kernel,
-    token_chunk=256,
-    activation="silu",
-)
-```
-
-For comparison and tests:
-
-```python
-from tunix_accel.tiled_mlp import dense_gated_mlp
-```
-
-For Gemma3 drop-in use:
-
-```python
-from tunix_accel import gemma3_tiled_mlp
-
-gemma3_tiled_mlp.install(token_chunk=256)
-
-trainer = peft_trainer.PeftTrainer(...)
-trainer.train(...)
-
-gemma3_tiled_mlp.uninstall()
-```
-
-The patch replaces `tunix.models.gemma3.model.FeedForward.block` process-wide.
-That keeps Gemma3's original `FeedForward.__call__` path intact, including its
-existing `remat_config=BLOCK` behavior.
-
-The explicit call above is not required in normal Tunix training. It exists for
-notebooks and scoped tests. In an installed environment, `sitecustomize.py`
-registers the import hook automatically.
-
-When the package is installed, this Gemma3 replacement is also applied
-automatically when `tunix.models.gemma3.model` is imported. Use these
-environment variables to control the drop-in behavior:
+Installed environments automatically patch Tunix Gemma3 when
+`tunix.models.gemma3.model` is imported.
 
 ```bash
 export TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK=128
+export TUNIX_ACCEL_TILED_MLP_LORA_ALPHA=32.0
 export TUNIX_ACCEL_DISABLE_TILED_MLP=1
 export TUNIX_ACCEL_DISABLE_CE=1
 ```
 
-For paired experiments, leave `TUNIX_ACCEL_DISABLE_TILED_MLP` unset for the
-tiled run and set it to `1` for the Tunix default-MLP baseline. Set
-`TUNIX_ACCEL_DISABLE_CE=1` when isolating MLP experiments from the CCE patch.
+Use `TUNIX_ACCEL_DISABLE_TILED_MLP=1` for the Default MLP baseline while keeping
+other autopatches available. Use `TUNIX_ACCEL_DISABLE_CE=1` when isolating MLP
+experiments from the Cut Cross Entropy patch.
 
-For startup-hook validation, install with `python -m pip install .` rather than
-`python -m pip install -e .`. The wheel install places a `.pth` hook in
-site-packages, which keeps the drop-in behavior working even on images that
-already ship a system `sitecustomize.py`.
+For notebooks or scoped tests:
 
-## Next Milestones
+```python
+from tunix_accel import gemma3_tiled_mlp
 
-1. Run TPU microbenchmarks:
-   - dense MLP vs tiled MLP
-   - CCE vs CCE + tiled MLP
-   - context frontier and XLA planned HBM
-2. Decide whether Pallas is needed. If XLA already lowers the tiled custom-VJP
-   path well, Pallas may not be worth the added model-family complexity.
-3. Add Qwix-LoRA-aware tiled projection support if LoRA runs become a primary
-   target. Current behavior intentionally falls back to the original MLP when
-   LoRA projection params are present.
+gemma3_tiled_mlp.install(token_chunk=128, lora_alpha=32.0)
+```
 
-## Known Risks
+Normal Tunix training code should not need that explicit call after the package
+is installed.
 
-- Tiling may reduce memory but slow steps because large GEMMs become several
-  smaller sequential GEMMs.
-- Drop-in replacement is more model-family-sensitive than CCE. This workstream
-  intentionally starts with Gemma3 only; other families may expose different MLP
-  module layouts.
-- Current tiled Gemma3 path is full-parameter/frozen-base only. Qwix-LoRA
-  projection deltas fall back to the original MLP unless strict mode is enabled.
-- XLA might already optimize some MLP patterns well enough that a handwritten
-  Pallas kernel is not the first bottleneck.
+## Verification
+
+Local tests:
+
+```bash
+python -m pytest -q tests/test_tiled_mlp.py tests/test_gemma3_tiled_mlp.py
+```
+
+The retained TPU validation artifacts are:
+
+- Memory/keypoint data: `data/gemma3_4b_context_keypoints.csv`
+- 500-step validation data: `data/gemma3_4b_validation_summary.csv`
+- Same-model parity data: `data/gemma3_4b_direct_parity.json`
+- Final figures: `assets/gemma3_4b_context_boundary_memory.png` and
+  `assets/gemma3_4b_validation_summary.png`

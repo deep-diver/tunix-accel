@@ -1,0 +1,34 @@
+{
+  "workstream": "03-TILED-MLP",
+  "final_assets": [
+    "gemma3_4b_cce_composition_smoke.png",
+    "gemma3_4b_context_boundary_memory.png",
+    "gemma3_4b_validation_summary.png"
+  ],
+  "final_data": [
+    "gemma3_4b_cce_composition_summary.csv",
+    "gemma3_4b_context_keypoints.csv",
+    "gemma3_4b_direct_parity.json",
+    "gemma3_4b_translation_samples.md",
+    "gemma3_4b_validation_history.csv",
+    "gemma3_4b_validation_summary.csv"
+  ],
+  "raw_records": [
+    "composition_cce_tiled_summary.csv",
+    "composition_tiled_cce_xla_memory_reports.json",
+    "context_l2048_default_summary.json",
+    "context_l2048_default_xla_memory_reports.json",
+    "context_l2048_tiled_summary.json",
+    "context_l2048_tiled_xla_memory_reports.json",
+    "context_l4096_default_oom_summary.json",
+    "context_l4096_tiled_summary.json",
+    "context_l4096_tiled_xla_memory_usage_report.txt",
+    "direct_parity_summary.json",
+    "quality_default_history.csv",
+    "quality_default_summary.json",
+    "quality_default_translations.jsonl",
+    "quality_tiled_history.csv",
+    "quality_tiled_summary.json",
+    "quality_tiled_translations.jsonl"
+  ]
+}

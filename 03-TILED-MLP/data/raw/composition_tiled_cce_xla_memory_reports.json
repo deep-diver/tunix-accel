@@ -1,0 +1,8 @@
+[
+  {
+    "path": "/tmp/xla_4b_l4096_tiled_cce/module_0634.jit__train_step.cl_914450892.after_optimizations-memory-usage-report.txt",
+    "bytes": 14389824512,
+    "human": "13.40GiB",
+    "size": 77220
+  }
+]

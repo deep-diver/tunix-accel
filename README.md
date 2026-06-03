@@ -6,15 +6,13 @@ for JAX/Tunix training.
 - `tunix_accel/`: reusable patch code for Tunix decoder-LM training.
 - `01-CCE/`: the final experiment report, retained summary data, figures, and
   reproduction guide.
-- `02-PACKING/`: the active padding-free / uncontaminated packing workstream.
-  It includes a no-model efficiency benchmark and a Gemma-tokenizer OPUS100
-  benchmark.
-- `03-TILED-MLP/`: the active Gemma3-only tiled gated-MLP workstream. It
-  currently contains a Gemma-free JAX custom-VJP prototype with
-  forward/gradient parity tests.
+- `02-PACKING/`: the final sequence-packing experiment report, retained summary
+  data, figures, and reproduction guide.
+- `03-TILED-MLP/`: the final Gemma3-only tiled gated-MLP experiment report,
+  retained summary data, raw final records, figures, and reproduction guide.
 
-Raw TPU traces, checkpoints, smoke outputs, and intermediate reports were
-removed after the CCE result was consolidated.
+Raw TPU traces, checkpoints, smoke outputs, and intermediate reports are kept
+out of the final workstream packages after each result is consolidated.
 
 ## Install
 
@@ -55,6 +53,7 @@ By default, installed environments automatically patch Tunix Gemma3
 ```bash
 export TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK=128
 export TUNIX_ACCEL_TILED_MLP_FALLBACK_ON_LORA=1
+export TUNIX_ACCEL_TILED_MLP_LORA_ALPHA=32.0
 export TUNIX_ACCEL_DISABLE_TILED_MLP=1
 ```
 
@@ -92,9 +91,9 @@ gemma3_tiled_mlp.install(token_chunk=256)
 
 Normal Tunix training code should not need this call. The explicit API is kept
 for notebooks, tests, or scoped experiments; installed environments apply the
-same replacement automatically when Gemma3 is imported. It currently targets
-non-LoRA Gemma3 projection kernels; Qwix-LoRA projection params fall back to the
-original MLP by default.
+same replacement automatically when Gemma3 is imported. The current adapter is
+Gemma3-specific and supports both dense projection kernels and Qwix-LoRA
+projection deltas.
 
 ## Packing API
 
@@ -125,10 +124,23 @@ token-valid mask as `valid_mask`.
 - Reproduction guide: `01-CCE/REPRODUCE.md`
 - Retained data: `01-CCE/data/`
 - Figures: `01-CCE/assets/`
-- Active packing notes: `02-PACKING/README.md`
-- Active tiled MLP notes: `03-TILED-MLP/README.md`
+- Packing report: `02-PACKING/TECHNICAL_REPORT.md`
+- Packing reproduction guide: `02-PACKING/REPRODUCE.md`
+- Packing retained data: `02-PACKING/data/`
+- Packing figures: `02-PACKING/assets/`
+- Tiled MLP report: `03-TILED-MLP/TECHNICAL_REPORT.md`
+- Tiled MLP reproduction guide: `03-TILED-MLP/REPRODUCE.md`
+- Tiled MLP retained data: `03-TILED-MLP/data/`
+- Tiled MLP figures: `03-TILED-MLP/assets/`
 - Follow-up research directions: `RESEARCH_DIRECTIONS.md`
 
-The final result: Cut Cross Entropy reduced Gemma3 270M EN-FR b16 train-step
-XLA peak memory from 10.21 GiB to 2.21 GiB while keeping eval loss and BLEU
-essentially at parity. Same-batch CCE steps were slower.
+Headline retained results:
+
+- Cut Cross Entropy reduced Gemma3 270M EN-FR b16 train-step XLA peak memory
+  from 10.21 GiB to 2.21 GiB while keeping eval loss and BLEU essentially at
+  parity. Same-batch CCE steps were slower.
+- Sequence packing raised useful target-token throughput by 20x+ on short
+  OPUS100 EN-FR SFT examples by removing padding waste.
+- Gemma3 Tiled MLP moved the 4B LoRA v5litepod-8 keypoint from Default MLP
+  L4096 compile OOM to Tiled MLP L4096 completion, with L2048 XLA planned HBM
+  moving from 82.9 GiB to 56.5 GiB aggregate.
