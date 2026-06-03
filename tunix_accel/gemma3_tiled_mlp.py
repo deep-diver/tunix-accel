@@ -84,6 +84,13 @@ def _lora_scale(*lora_as) -> float:
   return float(_STATE.lora_alpha) / float(rank)
 
 
+def _intermediate_sharding(module: nnx.Module) -> tuple[str | None, ...] | None:
+  try:
+    return tuple(module.config.shd_config.act_btf)
+  except AttributeError:
+    return None
+
+
 def _tiled_block(self, x):  # pylint: disable=protected-access
   if not _is_supported_gemma3_mlp(self):
     if _STATE.original_block is not None:
@@ -114,6 +121,7 @@ def _tiled_block(self, x):  # pylint: disable=protected-access
         token_chunk=_STATE.token_chunk,
         activation="gelu_approx",
         lora_scale=_lora_scale(gate_lora_a, up_lora_a, down_lora_a),
+        intermediate_sharding=_intermediate_sharding(self),
     )
 
   return tiled_gated_mlp(
@@ -123,6 +131,7 @@ def _tiled_block(self, x):  # pylint: disable=protected-access
       _projection_kernel(self, "down_proj"),
       token_chunk=_STATE.token_chunk,
       activation="gelu_approx",
+      intermediate_sharding=_intermediate_sharding(self),
   )
 
 

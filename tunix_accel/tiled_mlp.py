@@ -23,6 +23,7 @@ import jax.numpy as jnp
 
 Array = jax.Array
 Activation = Literal["silu", "gelu", "gelu_approx", "relu"]
+IntermediateSharding = tuple[str | None, ...] | None
 
 
 def _validate_token_chunk(token_chunk: int) -> int:
@@ -112,6 +113,17 @@ def _linear(x: Array, kernel: Array) -> Array:
   )
 
 
+def _maybe_shard_intermediate(
+    x: Array,
+    intermediate_sharding: IntermediateSharding,
+) -> Array:
+  if intermediate_sharding is None:
+    return x
+  from tunix.utils import sharding_utils  # pylint: disable=import-outside-toplevel
+
+  return sharding_utils.shard(x, tuple(intermediate_sharding))
+
+
 def dense_gated_mlp(
     hidden: Array,
     gate_kernel: Array,
@@ -119,6 +131,7 @@ def dense_gated_mlp(
     down_kernel: Array,
     *,
     activation: Activation = "silu",
+    intermediate_sharding: IntermediateSharding = None,
 ) -> Array:
   """Dense reference implementation for a gated MLP block."""
   activation = _validate_activation(activation)
@@ -126,6 +139,7 @@ def dense_gated_mlp(
   gate = _linear(hidden, gate_kernel)
   up = _linear(hidden, up_kernel)
   intermediate = _activation(gate, activation) * up
+  intermediate = _maybe_shard_intermediate(intermediate, intermediate_sharding)
   return _linear(intermediate, down_kernel)
 
 
@@ -155,6 +169,7 @@ def dense_lora_gated_mlp(
     *,
     lora_scale: float,
     activation: Activation = "silu",
+    intermediate_sharding: IntermediateSharding = None,
 ) -> Array:
   """Dense reference implementation for a LoRA-wrapped gated MLP block."""
   activation = _validate_activation(activation)
@@ -162,6 +177,7 @@ def dense_lora_gated_mlp(
   gate = _linear_lora(hidden, gate_kernel, gate_lora_a, gate_lora_b, lora_scale)
   up = _linear_lora(hidden, up_kernel, up_lora_a, up_lora_b, lora_scale)
   intermediate = _activation(gate, activation) * up
+  intermediate = _maybe_shard_intermediate(intermediate, intermediate_sharding)
   return _linear_lora(
       intermediate,
       down_kernel,
@@ -252,6 +268,7 @@ def make_tiled_gated_mlp(
     token_chunk: int = 128,
     *,
     activation: Activation = "silu",
+    intermediate_sharding: IntermediateSharding = None,
 ) -> Callable[[Array, Array, Array, Array], Array]:
   """Returns a tiled custom-VJP gated MLP function.
 
@@ -274,6 +291,7 @@ def make_tiled_gated_mlp(
         up_kernel,
         down_kernel,
         activation=activation,
+        intermediate_sharding=intermediate_sharding,
     )
 
   def fwd(
@@ -288,6 +306,7 @@ def make_tiled_gated_mlp(
         up_kernel,
         down_kernel,
         activation=activation,
+        intermediate_sharding=intermediate_sharding,
     )
     hidden_padded, n_tokens, original_shape = _flatten_and_pad(hidden, token_chunk)
     return out, (
@@ -329,6 +348,7 @@ def make_tiled_gated_mlp(
             tile_up,
             tile_down,
             activation=activation,
+            intermediate_sharding=intermediate_sharding,
         )
 
       _, pullback = jax.vjp(
@@ -369,11 +389,13 @@ def tiled_gated_mlp(
     *,
     token_chunk: int = 128,
     activation: Activation = "silu",
+    intermediate_sharding: IntermediateSharding = None,
 ) -> Array:
   """Computes a gated MLP by streaming the token dimension."""
   return make_tiled_gated_mlp(
       token_chunk=token_chunk,
       activation=activation,
+      intermediate_sharding=intermediate_sharding,
   )(hidden, gate_kernel, up_kernel, down_kernel)
 
 
@@ -383,6 +405,7 @@ def make_tiled_lora_gated_mlp(
     *,
     activation: Activation = "silu",
     lora_scale: float = 1.0,
+    intermediate_sharding: IntermediateSharding = None,
 ) -> Callable[
     [Array, Array, Array, Array, Array, Array, Array, Array, Array, Array],
     Array,
@@ -418,6 +441,7 @@ def make_tiled_lora_gated_mlp(
         down_lora_b,
         lora_scale=lora_scale,
         activation=activation,
+        intermediate_sharding=intermediate_sharding,
     )
 
   def fwd(
@@ -445,6 +469,7 @@ def make_tiled_lora_gated_mlp(
         down_lora_b,
         lora_scale=lora_scale,
         activation=activation,
+        intermediate_sharding=intermediate_sharding,
     )
     hidden_padded, n_tokens, original_shape = _flatten_and_pad(hidden, token_chunk)
     return out, (
@@ -523,6 +548,7 @@ def make_tiled_lora_gated_mlp(
             tile_down_b,
             lora_scale=lora_scale,
             activation=activation,
+            intermediate_sharding=intermediate_sharding,
         )
 
       _, pullback = jax.vjp(
@@ -568,12 +594,14 @@ def tiled_lora_gated_mlp(
     token_chunk: int = 128,
     activation: Activation = "silu",
     lora_scale: float = 1.0,
+    intermediate_sharding: IntermediateSharding = None,
 ) -> Array:
   """Computes a LoRA-wrapped gated MLP by streaming the token dimension."""
   return make_tiled_lora_gated_mlp(
       token_chunk=token_chunk,
       activation=activation,
       lora_scale=float(lora_scale),
+      intermediate_sharding=intermediate_sharding,
   )(
       hidden,
       gate_kernel,
