@@ -280,29 +280,23 @@ def make_tiled_gated_mlp(
       x = _slice_token_tile(hidden_padded, start, token_chunk)
       go = _slice_token_tile(grad_out_padded, start, token_chunk)
 
-      _, gate, up, intermediate = _tile_forward(
+      def tile_fn(tile_x, tile_gate, tile_up, tile_down):
+        return dense_gated_mlp(
+            tile_x,
+            tile_gate,
+            tile_up,
+            tile_down,
+            activation=activation,
+        )
+
+      _, pullback = jax.vjp(
+          tile_fn,
           x,
           gate_kernel,
           up_kernel,
           down_kernel,
-          activation,
       )
-      grad_intermediate = _linear(go, down_kernel.T)
-      grad_down_tile = _kernel_grad(intermediate, go)
-
-      grad_up_pre = grad_intermediate * _activation(gate, activation)
-      grad_gate_pre = (
-          grad_intermediate
-          * up
-          * _activation_grad(gate, activation).astype(grad_intermediate.dtype)
-      )
-
-      grad_x = (
-          _linear(grad_gate_pre, gate_kernel.T)
-          + _linear(grad_up_pre, up_kernel.T)
-      )
-      grad_gate_tile = _kernel_grad(x, grad_gate_pre)
-      grad_up_tile = _kernel_grad(x, grad_up_pre)
+      grad_x, grad_gate_tile, grad_up_tile, grad_down_tile = pullback(go)
 
       gh_acc = _update_token_tile(gh_acc, grad_x.astype(gh_acc.dtype), start)
       return (
