@@ -34,11 +34,13 @@ without renaming the project.
 ```bash
 export TUNIX_ACCEL_CE_TOKEN_CHUNK=128
 export TUNIX_ACCEL_CE_VOCAB_CHUNK=8192
+export TUNIX_ACCEL_DISABLE_CE=1
 export TUNIX_ACCEL_DISABLE_AUTOPATCH=1
 ```
 
-Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` for a Default CE baseline. Leave it unset
-for CCE.
+Use `TUNIX_ACCEL_DISABLE_CE=1` for a Default CE baseline while keeping other
+autopatches available. Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` to disable all
+automatic patches.
 
 ## Gemma3 Tiled MLP Controls
 
@@ -83,10 +85,11 @@ from tunix_accel import gemma3_tiled_mlp
 gemma3_tiled_mlp.install(token_chunk=256)
 ```
 
-The explicit API is useful for notebooks, tests, or scoped experiments. The
-installed package also applies the same replacement automatically when Gemma3 is
-imported. It currently targets non-LoRA Gemma3 projection kernels; Qwix-LoRA
-projection params fall back to the original MLP by default.
+Normal Tunix training code should not need this call. The explicit API is kept
+for notebooks, tests, or scoped experiments; installed environments apply the
+same replacement automatically when Gemma3 is imported. It currently targets
+non-LoRA Gemma3 projection kernels; Qwix-LoRA projection params fall back to the
+original MLP by default.
 
 ## Packing API
 

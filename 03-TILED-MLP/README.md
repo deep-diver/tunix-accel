@@ -119,6 +119,10 @@ The patch replaces `tunix.models.gemma3.model.FeedForward.block` process-wide.
 That keeps Gemma3's original `FeedForward.__call__` path intact, including its
 existing `remat_config=BLOCK` behavior.
 
+The explicit call above is not required in normal Tunix training. It exists for
+notebooks and scoped tests. In an installed environment, `sitecustomize.py`
+registers the import hook automatically.
+
 When the package is installed, this Gemma3 replacement is also applied
 automatically when `tunix.models.gemma3.model` is imported. Use these
 environment variables to control the drop-in behavior:
@@ -126,10 +130,12 @@ environment variables to control the drop-in behavior:
 ```bash
 export TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK=128
 export TUNIX_ACCEL_DISABLE_TILED_MLP=1
+export TUNIX_ACCEL_DISABLE_CE=1
 ```
 
 For paired experiments, leave `TUNIX_ACCEL_DISABLE_TILED_MLP` unset for the
-tiled run and set it to `1` for the Tunix default-MLP baseline.
+tiled run and set it to `1` for the Tunix default-MLP baseline. Set
+`TUNIX_ACCEL_DISABLE_CE=1` when isolating MLP experiments from the CCE patch.
 
 ## Next Milestones
 

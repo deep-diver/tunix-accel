@@ -19,6 +19,7 @@ from types import ModuleType
 CCE_TARGET_MODULE = "tunix.sft.peft_trainer"
 GEMMA3_TARGET_MODULE = "tunix.models.gemma3.model"
 ENV_DISABLE = "TUNIX_ACCEL_DISABLE_AUTOPATCH"
+ENV_DISABLE_CE = "TUNIX_ACCEL_DISABLE_CE"
 ENV_TOKEN_CHUNK = "TUNIX_ACCEL_CE_TOKEN_CHUNK"
 ENV_VOCAB_CHUNK = "TUNIX_ACCEL_CE_VOCAB_CHUNK"
 ENV_DISABLE_TILED_MLP = "TUNIX_ACCEL_DISABLE_TILED_MLP"
@@ -80,7 +81,7 @@ def _tiled_mlp_token_chunk_from_env() -> int:
 
 
 def _patch_cce(module: ModuleType | None = None) -> None:
-  if not _env_enabled():
+  if not _env_enabled() or _env_bool(ENV_DISABLE_CE, default=False):
     return
   target = module or sys.modules.get(CCE_TARGET_MODULE)
   if target is None or getattr(target, "_tunix_accel_autopatched", False):

@@ -59,3 +59,18 @@ def test_gemma3_tiled_mlp_autopatch_can_be_disabled() -> None:
       env={"TUNIX_ACCEL_DISABLE_TILED_MLP": "1"},
   )
   assert output.endswith("gemma3_tiled_mlp_autopatch_disabled=ok")
+
+
+def test_disabling_ce_does_not_disable_gemma3_tiled_mlp() -> None:
+  output = _run_python(
+      """
+      from tunix.models.gemma3 import model as gemma3_model
+      from tunix_accel import gemma3_tiled_mlp
+
+      assert gemma3_tiled_mlp.is_installed()
+      assert getattr(gemma3_model, "_tunix_accel_tiled_mlp_autopatched", False)
+      print("ce_disabled_gemma3_tiled_mlp_autopatch=ok")
+      """,
+      env={"TUNIX_ACCEL_DISABLE_CE": "1"},
+  )
+  assert output.endswith("ce_disabled_gemma3_tiled_mlp_autopatch=ok")
