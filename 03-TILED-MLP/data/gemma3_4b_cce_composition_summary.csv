@@ -1,0 +1,5 @@
+variant,status,xla_hbm_gib_per_chip,xla_hbm_gib_aggregate,headroom_vs_8chip_limit_gib,mean_step_time_sec_excl_first,runtime_peak_gib_aggregate,final_loss
+default_ce_default_mlp,OOM,20.19,161.52,-35.52000000000001,,,
+cce_default_mlp,OOM,16.6,132.8,-6.800000000000011,,,
+default_ce_tiled_mlp,OK,14.55,116.4,9.599999999999994,0.6335643974998675,15.082908630371094,6.9078369140625
+cce_tiled_mlp,OK,13.4,107.2,18.799999999999997,0.727080194842098,15.074283599853516,3.1477878093719482
