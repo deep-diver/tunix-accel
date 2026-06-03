@@ -226,30 +226,13 @@ def make_tiled_gated_mlp(
       up_kernel: Array,
       down_kernel: Array,
   ) -> Array:
-    _check_shapes(hidden, gate_kernel, up_kernel, down_kernel)
-    hidden_padded, n_tokens, original_shape = _flatten_and_pad(hidden, token_chunk)
-    token_chunks = _token_axis_length(hidden_padded) // token_chunk
-    output_dim = down_kernel.shape[-1]
-    out = jnp.zeros(
-        hidden_padded.shape[:-1] + (output_dim,),
-        dtype=hidden.dtype,
+    return dense_gated_mlp(
+        hidden,
+        gate_kernel,
+        up_kernel,
+        down_kernel,
+        activation=activation,
     )
-
-    def body(i: Array, acc: Array) -> Array:
-      start = i * token_chunk
-      x = _slice_token_tile(hidden_padded, start, token_chunk)
-      tile_out, _, _, _ = _tile_forward(
-          x,
-          gate_kernel,
-          up_kernel,
-          down_kernel,
-          activation,
-      )
-      return _update_token_tile(acc, tile_out.astype(out.dtype), start)
-
-    out = jax.lax.fori_loop(0, token_chunks, body, out)
-    out = _trim_token_axis(out, n_tokens)
-    return out.reshape(original_shape[:-1] + (output_dim,))
 
   def fwd(
       hidden: Array,
@@ -257,7 +240,13 @@ def make_tiled_gated_mlp(
       up_kernel: Array,
       down_kernel: Array,
   ):
-    out = tiled_gated_mlp(hidden, gate_kernel, up_kernel, down_kernel)
+    out = dense_gated_mlp(
+        hidden,
+        gate_kernel,
+        up_kernel,
+        down_kernel,
+        activation=activation,
+    )
     hidden_padded, n_tokens, original_shape = _flatten_and_pad(hidden, token_chunk)
     return out, (
         hidden_padded,
