@@ -1,0 +1,52 @@
+{
+  "model_size": "4b",
+  "model_id": "google/gemma-3-4b-it",
+  "model_path": "gs://gemma-data/checkpoints/gemma3-4b-it",
+  "batch_size": 1,
+  "max_length": 512,
+  "num_examples": 64,
+  "lora_rank": 16,
+  "lora_alpha": 32.0,
+  "lora_module_path": ".*(q_einsum|kv_einsum|qkv_einsum|attn_vec_einsum|gate_proj|up_proj|down_proj).*",
+  "tiled_mlp_token_chunk": 128,
+  "tiled_mlp_backend": "pallas",
+  "mesh_shape": {
+    "fsdp": 8,
+    "tp": 1
+  },
+  "jax_devices": [
+    "TPU_0(process=0,(0,0,0,0))",
+    "TPU_1(process=0,(1,0,0,0))",
+    "TPU_2(process=0,(0,1,0,0))",
+    "TPU_3(process=0,(1,1,0,0))",
+    "TPU_4(process=0,(0,2,0,0))",
+    "TPU_5(process=0,(1,2,0,0))",
+    "TPU_6(process=0,(0,3,0,0))",
+    "TPU_7(process=0,(1,3,0,0))"
+  ],
+  "input_tokens": {
+    "valid_tokens": 38,
+    "loss_tokens": 12,
+    "capacity_tokens": 512
+  },
+  "default": {
+    "loss": 4.643880367279053,
+    "grad_norm": 155.0794219970703
+  },
+  "tiled": {
+    "loss": 4.643880367279053,
+    "grad_norm": 155.06394958496094,
+    "installed": true
+  },
+  "diff": {
+    "loss_abs_diff": 0.0,
+    "loss_rel_diff": 0.0,
+    "grad_norm_abs_diff": 0.015472412109375,
+    "grad_norm_rel_diff": 9.977089100620518e-05,
+    "leaf_count": 408,
+    "element_count": 28409856,
+    "max_abs_diff": 0.140625,
+    "max_rel_diff": 109672544.0,
+    "rms_abs_diff": 0.0009346304246385253
+  }
+}

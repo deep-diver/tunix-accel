@@ -17,6 +17,7 @@ def _run_python(code: str, *, env: dict[str, str] | None = None) -> str:
   run_env = os.environ.copy()
   run_env.pop("TUNIX_ACCEL_DISABLE_AUTOPATCH", None)
   run_env.pop("TUNIX_ACCEL_DISABLE_TILED_MLP", None)
+  run_env.pop("TUNIX_ACCEL_TILED_MLP_BACKEND", None)
   run_env["PYTHONPATH"] = str(REPO_ROOT)
   if env:
     run_env.update(env)
@@ -74,3 +75,19 @@ def test_disabling_ce_does_not_disable_gemma3_tiled_mlp() -> None:
       env={"TUNIX_ACCEL_DISABLE_CE": "1"},
   )
   assert output.endswith("ce_disabled_gemma3_tiled_mlp_autopatch=ok")
+
+
+def test_gemma3_tiled_mlp_autopatch_reads_backend_env() -> None:
+  output = _run_python(
+      """
+      from tunix.models.gemma3 import model as gemma3_model
+      from tunix_accel import gemma3_tiled_mlp
+
+      assert gemma3_tiled_mlp.is_installed()
+      assert getattr(gemma3_model, "_tunix_accel_tiled_mlp_autopatched", False)
+      assert gemma3_tiled_mlp._STATE.matmul_backend == "pallas"
+      print("gemma3_tiled_mlp_backend_env=ok")
+      """,
+      env={"TUNIX_ACCEL_TILED_MLP_BACKEND": "pallas"},
+  )
+  assert output.endswith("gemma3_tiled_mlp_backend_env=ok")

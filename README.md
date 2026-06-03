@@ -10,6 +10,8 @@ for JAX/Tunix training.
   data, figures, and reproduction guide.
 - `03-TILED-MLP/`: the final Gemma3-only tiled gated-MLP experiment report,
   retained summary data, raw final records, figures, and reproduction guide.
+- `03.5-PALLAS-TILED-MLP/`: the Pallas-backend follow-up for Gemma3 Tiled MLP,
+  comparing the opt-in Pallas matmul backend against the 03 XLA tiled backend.
 
 Raw TPU traces, checkpoints, smoke outputs, and intermediate reports are kept
 out of the final workstream packages after each result is consolidated.
@@ -52,14 +54,18 @@ By default, installed environments automatically patch Tunix Gemma3
 
 ```bash
 export TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK=128
+export TUNIX_ACCEL_TILED_MLP_BACKEND=xla
+export TUNIX_ACCEL_TILED_MLP_BACKEND=pallas
 export TUNIX_ACCEL_TILED_MLP_FALLBACK_ON_LORA=1
 export TUNIX_ACCEL_TILED_MLP_LORA_ALPHA=32.0
 export TUNIX_ACCEL_DISABLE_TILED_MLP=1
 ```
 
 Use `TUNIX_ACCEL_DISABLE_TILED_MLP=1` for a Default MLP baseline while keeping
-other autopatches available. Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` to disable
-all automatic patches.
+other autopatches available. The backend defaults to `xla`; use
+`TUNIX_ACCEL_TILED_MLP_BACKEND=pallas` to opt into the experimental TPU Pallas
+matmul backend. Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` to disable all automatic
+patches.
 
 ## Cut Cross Entropy Explicit API
 
@@ -86,14 +92,16 @@ from tunix_accel.tunix_lora_ce import use_trainable_lm_head_ce
 ```python
 from tunix_accel import gemma3_tiled_mlp
 
-gemma3_tiled_mlp.install(token_chunk=256)
+gemma3_tiled_mlp.install(token_chunk=256, matmul_backend="xla")
+gemma3_tiled_mlp.install(token_chunk=128, matmul_backend="pallas")
 ```
 
 Normal Tunix training code should not need this call. The explicit API is kept
 for notebooks, tests, or scoped experiments; installed environments apply the
 same replacement automatically when Gemma3 is imported. The current adapter is
 Gemma3-specific and supports both dense projection kernels and Qwix-LoRA
-projection deltas.
+projection deltas. The Pallas backend is opt-in and currently retained as an
+experimental backend rather than the default.
 
 ## Packing API
 
@@ -132,6 +140,10 @@ token-valid mask as `valid_mask`.
 - Tiled MLP reproduction guide: `03-TILED-MLP/REPRODUCE.md`
 - Tiled MLP retained data: `03-TILED-MLP/data/`
 - Tiled MLP figures: `03-TILED-MLP/assets/`
+- Pallas Tiled MLP report: `03.5-PALLAS-TILED-MLP/TECHNICAL_REPORT.md`
+- Pallas Tiled MLP reproduction guide: `03.5-PALLAS-TILED-MLP/REPRODUCE.md`
+- Pallas Tiled MLP retained data: `03.5-PALLAS-TILED-MLP/data/`
+- Pallas Tiled MLP figures: `03.5-PALLAS-TILED-MLP/assets/`
 - Follow-up research directions: `RESEARCH_DIRECTIONS.md`
 
 Headline retained results:
@@ -144,3 +156,6 @@ Headline retained results:
 - Gemma3 Tiled MLP moved the 4B LoRA v5litepod-8 keypoint from Default MLP
   L4096 compile OOM to Tiled MLP L4096 completion, with L2048 XLA planned HBM
   moving from 82.9 GiB to 56.5 GiB aggregate.
+- The Pallas Tiled MLP follow-up proved an opt-in TPU Pallas backend works and
+  composes with CCE, but it is not yet a better default than the XLA tiled
+  backend: L4096 planned HBM improved by 3.0%, while step time slowed by 5.4%.

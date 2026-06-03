@@ -1,0 +1,7 @@
+model,tpu,chips,mesh,training_mode,lora_rank,batch_size,max_length,variant,status,steps_recorded,xla_hbm_gib_per_chip,xla_hbm_gib_aggregate,runtime_peak_gib_aggregate,mean_step_time_sec_excl_first,final_loss,note,backend
+gemma3-4b-it,v5litepod-8,8,"fsdp=8,tp=1",lora,16,1,2048,default,ok,5,10.36,82.88,19.79571533203125,0.26631161925001834,6.4697265625,same-context XLA report,default
+gemma3-4b-it,v5litepod-8,8,"fsdp=8,tp=1",lora,16,1,2048,tiled,ok,5,7.06,56.48,17.783580780029297,0.28372997575002046,6.515869140625,same-context XLA report,xla
+gemma3-4b-it,v5litepod-8,8,"fsdp=8,tp=1",lora,16,1,4096,default,oom,,20.19,161.52,,,,compile OOM; XLA planned 20.19 GiB/chip over 15.75 GiB/chip available,default
+gemma3-4b-it,v5litepod-8,8,"fsdp=8,tp=1",lora,16,1,4096,tiled,ok,5,14.55,116.4,15.082908630371094,0.6335643974998675,6.9078369140625,completed 5-step keypoint run,xla
+gemma3-4b-it,v5litepod-8,8,"fsdp=8,tp=1",lora,16,1,2048,tiled,ok,5,7.173,57.3844,18.029329776763916,0.3040568437500042,6.5291748046875,Pallas tiled MLP backend; CCE disabled; XLA train_step memory report,pallas
+gemma3-4b-it,v5litepod-8,8,"fsdp=8,tp=1",lora,16,1,4096,tiled,ok,5,14.1114,112.8912,15.108742713928223,0.6677968812499557,6.367919921875,Pallas tiled MLP backend; CCE disabled; XLA train_step memory report,pallas

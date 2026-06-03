@@ -93,6 +93,19 @@ def test_gemma3_mlp_block_matches_original():
   assert jnp.allclose(actual, expected, atol=2e-5, rtol=2e-5)
 
 
+def test_gemma3_mlp_block_matches_original_with_pallas_backend_fallback():
+  model = _tiny_model()
+  _randomize_mlp(model)
+  x = jax.random.normal(jax.random.key(9), (2, 7, model.config.embed_dim))
+  mlp = model.layers[0].mlp
+
+  expected = mlp.block(x)
+  with gemma3_tiled_mlp.installed(token_chunk=3, matmul_backend="pallas"):
+    actual = mlp.block(x)
+
+  assert jnp.allclose(actual, expected, atol=2e-5, rtol=2e-5)
+
+
 def test_gemma3_mlp_call_matches_original_with_block_remat():
   model = _tiny_model(remat_config=gemma3_model.RematConfig.BLOCK)
   _randomize_mlp(model)

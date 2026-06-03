@@ -1,0 +1,3 @@
+model,tpu,chips,mesh,training_mode,lora_rank,batch_size,max_length,variant,backend,status,steps_recorded,xla_hbm_gib_per_chip,xla_hbm_gib_aggregate,runtime_peak_gib_aggregate,mean_step_time_sec_excl_first,final_loss,note
+gemma3-4b-it,v5litepod-8,8,"fsdp=8,tp=1",lora,16,1,2048,tiled,pallas,ok,5,7.173,57.3844,18.029329776763916,0.3040568437500042,6.5291748046875,Pallas tiled MLP backend; CCE disabled; XLA train_step memory report
+gemma3-4b-it,v5litepod-8,8,"fsdp=8,tp=1",lora,16,1,4096,tiled,pallas,ok,5,14.1114,112.8912,15.108742713928223,0.6677968812499557,6.367919921875,Pallas tiled MLP backend; CCE disabled; XLA train_step memory report

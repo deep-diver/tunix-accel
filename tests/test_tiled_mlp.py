@@ -124,6 +124,34 @@ def test_tiled_gated_mlp_jit_gradients_match_dense():
   _tree_allclose(tiled_grads, dense_grads, atol=4e-5, rtol=4e-5)
 
 
+def test_pallas_backend_gated_mlp_gradients_match_dense_on_fallback():
+  hidden, gate, up, down = _inputs()
+
+  def dense_loss(h, g, u, d):
+    out = dense_gated_mlp(h, g, u, d, activation="gelu_approx")
+    return jnp.mean(jnp.square(out))
+
+  def tiled_loss(h, g, u, d):
+    out = tiled_gated_mlp(
+        h,
+        g,
+        u,
+        d,
+        token_chunk=4,
+        activation="gelu_approx",
+        matmul_backend="pallas",
+    )
+    return jnp.mean(jnp.square(out))
+
+  assert jnp.allclose(tiled_loss(hidden, gate, up, down), dense_loss(hidden, gate, up, down), atol=2e-5, rtol=2e-5)
+  _tree_allclose(
+      jax.grad(tiled_loss, argnums=(0, 1, 2, 3))(hidden, gate, up, down),
+      jax.grad(dense_loss, argnums=(0, 1, 2, 3))(hidden, gate, up, down),
+      atol=5e-5,
+      rtol=5e-5,
+  )
+
+
 def test_tiled_lora_gated_mlp_gradients_match_dense_lora():
   hidden, gate, up, down = _inputs()
   key = jax.random.key(7)
@@ -160,6 +188,46 @@ def test_tiled_lora_gated_mlp_gradients_match_dense_lora():
       jax.grad(dense_loss, argnums=tuple(range(len(args))))(*args),
       atol=4e-5,
       rtol=4e-5,
+  )
+
+
+def test_pallas_backend_lora_gated_mlp_gradients_match_dense_lora_on_fallback():
+  hidden, gate, up, down = _inputs()
+  key = jax.random.key(11)
+  keys = iter(jax.random.split(key, 6))
+  rank = 3
+  gate_a = jax.random.normal(next(keys), (gate.shape[0], rank), dtype=jnp.float32) * 0.1
+  gate_b = jax.random.normal(next(keys), (rank, gate.shape[1]), dtype=jnp.float32) * 0.1
+  up_a = jax.random.normal(next(keys), (up.shape[0], rank), dtype=jnp.float32) * 0.1
+  up_b = jax.random.normal(next(keys), (rank, up.shape[1]), dtype=jnp.float32) * 0.1
+  down_a = jax.random.normal(next(keys), (down.shape[0], rank), dtype=jnp.float32) * 0.1
+  down_b = jax.random.normal(next(keys), (rank, down.shape[1]), dtype=jnp.float32) * 0.1
+
+  def dense_loss(*args):
+    out = dense_lora_gated_mlp(
+        *args,
+        lora_scale=2.0,
+        activation="gelu_approx",
+    )
+    return jnp.mean(jnp.square(out))
+
+  def tiled_loss(*args):
+    out = tiled_lora_gated_mlp(
+        *args,
+        token_chunk=4,
+        lora_scale=2.0,
+        activation="gelu_approx",
+        matmul_backend="pallas",
+    )
+    return jnp.mean(jnp.square(out))
+
+  args = (hidden, gate, gate_a, gate_b, up, up_a, up_b, down, down_a, down_b)
+  assert jnp.allclose(tiled_loss(*args), dense_loss(*args), atol=2e-5, rtol=2e-5)
+  _tree_allclose(
+      jax.grad(tiled_loss, argnums=tuple(range(len(args))))(*args),
+      jax.grad(dense_loss, argnums=tuple(range(len(args))))(*args),
+      atol=5e-5,
+      rtol=5e-5,
   )
 
 

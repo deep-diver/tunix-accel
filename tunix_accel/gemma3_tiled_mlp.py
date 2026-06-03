@@ -9,6 +9,7 @@ from typing import Any
 from flax import nnx
 import jax
 
+from tunix_accel.tiled_mlp import _validate_matmul_backend
 from tunix_accel.tiled_mlp import tiled_gated_mlp
 from tunix_accel.tiled_mlp import tiled_lora_gated_mlp
 
@@ -20,6 +21,7 @@ class _PatchState:
   token_chunk: int = 128
   fallback_to_original_on_lora: bool = True
   lora_alpha: float = 32.0
+  matmul_backend: str = "xla"
 
 
 _STATE = _PatchState()
@@ -122,6 +124,7 @@ def _tiled_block(self, x):  # pylint: disable=protected-access
         activation="gelu_approx",
         lora_scale=_lora_scale(gate_lora_a, up_lora_a, down_lora_a),
         intermediate_sharding=_intermediate_sharding(self),
+        matmul_backend=_STATE.matmul_backend,
     )
 
   return tiled_gated_mlp(
@@ -132,6 +135,7 @@ def _tiled_block(self, x):  # pylint: disable=protected-access
       token_chunk=_STATE.token_chunk,
       activation="gelu_approx",
       intermediate_sharding=_intermediate_sharding(self),
+      matmul_backend=_STATE.matmul_backend,
   )
 
 
@@ -140,6 +144,7 @@ def install(
     token_chunk: int = 128,
     fallback_to_original_on_lora: bool = True,
     lora_alpha: float = 32.0,
+    matmul_backend: str = "xla",
 ) -> None:
   """Installs a process-local tiled MLP override for Tunix Gemma3.
 
@@ -150,6 +155,7 @@ def install(
   """
   if token_chunk <= 0:
     raise ValueError(f"token_chunk must be positive, got {token_chunk}.")
+  matmul_backend = _validate_matmul_backend(matmul_backend)
 
   from tunix.models.gemma3 import model as gemma3_model  # pylint: disable=import-outside-toplevel
 
@@ -161,6 +167,7 @@ def install(
   _STATE.token_chunk = int(token_chunk)
   _STATE.fallback_to_original_on_lora = bool(fallback_to_original_on_lora)
   _STATE.lora_alpha = float(lora_alpha)
+  _STATE.matmul_backend = matmul_backend
 
 
 def uninstall() -> None:
@@ -184,16 +191,19 @@ def installed(
     token_chunk: int = 128,
     fallback_to_original_on_lora: bool = True,
     lora_alpha: float = 32.0,
+    matmul_backend: str = "xla",
 ):
   """Context manager form of `install()`."""
   was_installed = _STATE.installed
   old_token_chunk = _STATE.token_chunk
   old_fallback = _STATE.fallback_to_original_on_lora
   old_lora_alpha = _STATE.lora_alpha
+  old_matmul_backend = _STATE.matmul_backend
   install(
       token_chunk=token_chunk,
       fallback_to_original_on_lora=fallback_to_original_on_lora,
       lora_alpha=lora_alpha,
+      matmul_backend=matmul_backend,
   )
   try:
     yield
@@ -203,6 +213,7 @@ def installed(
           token_chunk=old_token_chunk,
           fallback_to_original_on_lora=old_fallback,
           lora_alpha=old_lora_alpha,
+          matmul_backend=old_matmul_backend,
       )
     else:
       uninstall()

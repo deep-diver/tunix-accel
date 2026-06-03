@@ -1,0 +1,151 @@
+{
+  "reports": [
+    {
+      "bytes": 7702000128,
+      "file": "module_2529.jit__train_step.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 7.173046588897705,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_2529.jit__train_step.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "7.17GiB"
+    },
+    {
+      "bytes": 369100800,
+      "file": "module_0110.jit_gather.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.3437519073486328,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_0110.jit_gather.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "352.00MiB"
+    },
+    {
+      "bytes": 335544320,
+      "file": "module_2508.jit_transpose.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.3125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_2508.jit_transpose.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "320.00MiB"
+    },
+    {
+      "bytes": 335544320,
+      "file": "module_0000.jit_convert_element_type.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.3125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_0000.jit_convert_element_type.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "320.00MiB"
+    },
+    {
+      "bytes": 335544320,
+      "file": "module_0004.jit__identity_fn.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.3125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_0004.jit__identity_fn.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "320.00MiB"
+    },
+    {
+      "bytes": 168824320,
+      "file": "module_2512.jit_dot_general.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.15722990036010742,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_2512.jit_dot_general.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "161.00MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_0832.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_0832.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_2456.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_2456.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_0776.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_0776.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_1040.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_1040.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_1916.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_1916.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_0056.jit_convert_element_type.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_0056.jit_convert_element_type.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_2420.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_2420.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_0060.jit__identity_fn.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_0060.jit__identity_fn.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_2232.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_2232.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_1692.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_1692.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_1132.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_1132.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_2160.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_2160.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_2496.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_2496.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    },
+    {
+      "bytes": 13107200,
+      "file": "module_2064.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "gib": 0.01220703125,
+      "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_2064.jit__unnamed_function.cl_914450892.after_optimizations-memory-usage-report.txt",
+      "shown": "12.50MiB"
+    }
+  ],
+  "top": {
+    "bytes": 7702000128,
+    "file": "module_2529.jit__train_step.cl_914450892.after_optimizations-memory-usage-report.txt",
+    "gib": 7.173046588897705,
+    "path": "/tmp/pallas_xla_mem_reports/tmp/xla_pallas_l2048/module_2529.jit__train_step.cl_914450892.after_optimizations-memory-usage-report.txt",
+    "shown": "7.17GiB"
+  }
+}

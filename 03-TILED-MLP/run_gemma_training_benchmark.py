@@ -62,6 +62,10 @@ def configure_autopatch_env(args: argparse.Namespace) -> None:
       "TUNIX_ACCEL_TILED_MLP_LORA_ALPHA",
       str(args.lora_alpha),
   )
+  os.environ.setdefault(
+      "TUNIX_ACCEL_TILED_MLP_BACKEND",
+      args.tiled_mlp_backend,
+  )
   if args.mlp_variant == "default":
     os.environ["TUNIX_ACCEL_DISABLE_TILED_MLP"] = "1"
   else:
@@ -108,6 +112,7 @@ def enrich_summary(
       "tiled_mlp_token_chunk": int(
           os.environ.get("TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK", "128")
       ),
+      "tiled_mlp_backend": os.environ.get("TUNIX_ACCEL_TILED_MLP_BACKEND", "xla"),
       "training_mode": "full-parameter"
       if args.lora_rank == 0
       else "lora",
@@ -127,6 +132,10 @@ def enrich_summary(
           ),
           "TUNIX_ACCEL_TILED_MLP_LORA_ALPHA": os.environ.get(
               "TUNIX_ACCEL_TILED_MLP_LORA_ALPHA",
+              "",
+          ),
+          "TUNIX_ACCEL_TILED_MLP_BACKEND": os.environ.get(
+              "TUNIX_ACCEL_TILED_MLP_BACKEND",
               "",
           ),
       },
@@ -198,6 +207,11 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--log-every", type=int, default=1)
   parser.add_argument("--seed", type=int, default=0)
   parser.add_argument("--tiled-mlp-token-chunk", type=int, default=128)
+  parser.add_argument(
+      "--tiled-mlp-backend",
+      choices=["xla", "pallas"],
+      default=os.environ.get("TUNIX_ACCEL_TILED_MLP_BACKEND", "xla"),
+  )
   parser.add_argument("--outdir", default="03-TILED-MLP/results/gemma-training")
   args = parser.parse_args()
 

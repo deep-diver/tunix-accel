@@ -130,6 +130,7 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--max-steps", type=int, default=1)
   parser.add_argument("--seed", type=int, default=0)
   parser.add_argument("--tiled-mlp-token-chunk", type=int, default=128)
+  parser.add_argument("--tiled-mlp-backend", choices=["xla", "pallas"], default="xla")
   parser.add_argument("--outdir", default="03-TILED-MLP/results/gemma3-tiled-mlp-parity")
   args = parser.parse_args()
 
@@ -215,6 +216,7 @@ def main() -> None:
         token_chunk=args.tiled_mlp_token_chunk,
         fallback_to_original_on_lora=False,
         lora_alpha=args.lora_alpha,
+        matmul_backend=args.tiled_mlp_backend,
     )
     tiled_loss, tiled_grads = loss_and_grad()
     tiled_loss.block_until_ready()
@@ -236,6 +238,7 @@ def main() -> None:
       "lora_alpha": args.lora_alpha,
       "lora_module_path": args.lora_module_path if args.lora_rank > 0 else "",
       "tiled_mlp_token_chunk": args.tiled_mlp_token_chunk,
+      "tiled_mlp_backend": args.tiled_mlp_backend,
       "mesh_shape": dict(mesh.shape),
       "jax_devices": [str(device) for device in jax.devices()],
       "input_tokens": {
