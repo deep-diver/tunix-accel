@@ -9,6 +9,9 @@ description = "Drop-in acceleration and memory-efficiency patches for JAX/Tunix 
 requires-python = ">=3.11"
 dependencies = []
 
+[tool.setuptools]
+py-modules = ["sitecustomize", "tunix_accel_startup"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["tunix_accel*"]

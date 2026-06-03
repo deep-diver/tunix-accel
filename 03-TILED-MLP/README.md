@@ -137,6 +137,11 @@ For paired experiments, leave `TUNIX_ACCEL_DISABLE_TILED_MLP` unset for the
 tiled run and set it to `1` for the Tunix default-MLP baseline. Set
 `TUNIX_ACCEL_DISABLE_CE=1` when isolating MLP experiments from the CCE patch.
 
+For startup-hook validation, install with `python -m pip install .` rather than
+`python -m pip install -e .`. The wheel install places a `.pth` hook in
+site-packages, which keeps the drop-in behavior working even on images that
+already ship a system `sitecustomize.py`.
+
 ## Next Milestones
 
 1. Run TPU microbenchmarks:

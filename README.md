@@ -20,7 +20,7 @@ removed after the CCE result was consolidated.
 
 ```bash
 python -m pip install -r requirements.txt
-python -m pip install -e .
+python -m pip install .
 ```
 
 When installed, the package registers a small `sitecustomize.py` hook. It waits
@@ -28,6 +28,11 @@ for supported Tunix modules to be imported, then applies process-local patches:
 Cut Cross Entropy for Tunix SFT loss, and the Gemma3 tiled MLP replacement for
 `tunix.models.gemma3.model`. Future patches can live under the same package
 without renaming the project.
+
+Use a regular wheel install when validating startup hooks. Editable installs are
+fine for code hacking, but some environments already provide a system
+`sitecustomize.py`; the wheel install also places a `.pth` startup hook in
+site-packages so the drop-in patches still load there.
 
 ## Cut Cross Entropy Controls
 
