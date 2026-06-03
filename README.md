@@ -24,10 +24,10 @@ python -m pip install -e .
 ```
 
 When installed, the package registers a small `sitecustomize.py` hook. It waits
-for `tunix.sft.peft_trainer` to be imported, then patches Tunix's default
-decoder-LM loss for supported model families. Today that means the Cut Cross
-Entropy (CCE) loss path; future patches can live under the same package without
-renaming the project.
+for supported Tunix modules to be imported, then applies process-local patches:
+Cut Cross Entropy for Tunix SFT loss, and the Gemma3 tiled MLP replacement for
+`tunix.models.gemma3.model`. Future patches can live under the same package
+without renaming the project.
 
 ## Cut Cross Entropy Controls
 
@@ -39,6 +39,21 @@ export TUNIX_ACCEL_DISABLE_AUTOPATCH=1
 
 Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` for a Default CE baseline. Leave it unset
 for CCE.
+
+## Gemma3 Tiled MLP Controls
+
+By default, installed environments automatically patch Tunix Gemma3
+`FeedForward.block` when `tunix.models.gemma3.model` is imported.
+
+```bash
+export TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK=128
+export TUNIX_ACCEL_TILED_MLP_FALLBACK_ON_LORA=1
+export TUNIX_ACCEL_DISABLE_TILED_MLP=1
+```
+
+Use `TUNIX_ACCEL_DISABLE_TILED_MLP=1` for a Default MLP baseline while keeping
+other autopatches available. Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` to disable
+all automatic patches.
 
 ## Cut Cross Entropy Explicit API
 
@@ -68,9 +83,10 @@ from tunix_accel import gemma3_tiled_mlp
 gemma3_tiled_mlp.install(token_chunk=256)
 ```
 
-This process-local patch replaces Tunix Gemma3 `FeedForward.block` with the
-tiled gated-MLP implementation. It currently targets non-LoRA Gemma3 projection
-kernels; Qwix-LoRA projection params fall back to the original MLP by default.
+The explicit API is useful for notebooks, tests, or scoped experiments. The
+installed package also applies the same replacement automatically when Gemma3 is
+imported. It currently targets non-LoRA Gemma3 projection kernels; Qwix-LoRA
+projection params fall back to the original MLP by default.
 
 ## Packing API
 
