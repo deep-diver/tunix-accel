@@ -1,0 +1,2 @@
+variant,step,loss,step_time_sec,grad_norm,valid_tokens,loss_tokens,capacity_tokens,valid_ratio,loss_ratio,cumulative_valid_tokens,cumulative_loss_tokens,cumulative_step_time_sec
+none,1,2.2181339263916016,31.27264296300001,56.75,38,12,8192,0.004638671875,0.00146484375,38,12,31.27264296300001

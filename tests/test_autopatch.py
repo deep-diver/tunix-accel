@@ -17,6 +17,8 @@ def _run_python(code: str, *, env: dict[str, str] | None = None) -> str:
   run_env = os.environ.copy()
   run_env.pop("TUNIX_ACCEL_DISABLE_AUTOPATCH", None)
   run_env.pop("TUNIX_ACCEL_DISABLE_TILED_MLP", None)
+  run_env.pop("TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY", None)
+  run_env.pop("TUNIX_ACCEL_ACTIVATION_POLICY", None)
   run_env["PYTHONPATH"] = str(REPO_ROOT)
   if env:
     run_env.update(env)
@@ -74,3 +76,22 @@ def test_disabling_ce_does_not_disable_gemma3_tiled_mlp() -> None:
       env={"TUNIX_ACCEL_DISABLE_CE": "1"},
   )
   assert output.endswith("ce_disabled_gemma3_tiled_mlp_autopatch=ok")
+
+
+def test_gemma3_activation_policy_autopatch_reads_policy_env() -> None:
+  output = _run_python(
+      """
+      from tunix.models.gemma3 import model as gemma3_model
+      from tunix_accel import gemma3_activation_policy
+
+      assert gemma3_activation_policy.is_installed()
+      assert getattr(gemma3_model, "_tunix_accel_activation_policy_autopatched", False)
+      assert gemma3_activation_policy._STATE.policy == "split_remat"
+      print("gemma3_activation_policy_autopatch=ok")
+      """,
+      env={
+          "TUNIX_ACCEL_DISABLE_TILED_MLP": "1",
+          "TUNIX_ACCEL_ACTIVATION_POLICY": "split_remat",
+      },
+  )
+  assert output.endswith("gemma3_activation_policy_autopatch=ok")

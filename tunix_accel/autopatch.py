@@ -26,10 +26,20 @@ ENV_DISABLE_TILED_MLP = "TUNIX_ACCEL_DISABLE_TILED_MLP"
 ENV_TILED_MLP_TOKEN_CHUNK = "TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK"
 ENV_TILED_MLP_FALLBACK_ON_LORA = "TUNIX_ACCEL_TILED_MLP_FALLBACK_ON_LORA"
 ENV_TILED_MLP_LORA_ALPHA = "TUNIX_ACCEL_TILED_MLP_LORA_ALPHA"
+ENV_ENABLE_SPLASH_ATTENTION = "TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION"
+ENV_SPLASH_ATTENTION_INTERPRET = "TUNIX_ACCEL_SPLASH_ATTENTION_INTERPRET"
+ENV_DISABLE_ACTIVATION_POLICY = "TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY"
+ENV_ACTIVATION_POLICY = "TUNIX_ACCEL_ACTIVATION_POLICY"
+ENV_ACTIVATION_PREVENT_CSE = "TUNIX_ACCEL_ACTIVATION_PREVENT_CSE"
+ENV_ACTIVATION_OFFLOAD_SRC = "TUNIX_ACCEL_ACTIVATION_OFFLOAD_SRC"
+ENV_ACTIVATION_OFFLOAD_DST = "TUNIX_ACCEL_ACTIVATION_OFFLOAD_DST"
 DEFAULT_TOKEN_CHUNK = 128
 DEFAULT_VOCAB_CHUNK = 8192
 DEFAULT_TILED_MLP_TOKEN_CHUNK = 128
 DEFAULT_TILED_MLP_LORA_ALPHA = 32.0
+DEFAULT_ACTIVATION_POLICY = "none"
+DEFAULT_ACTIVATION_OFFLOAD_SRC = "device"
+DEFAULT_ACTIVATION_OFFLOAD_DST = "pinned_host"
 
 
 def _env_enabled() -> bool:
@@ -93,6 +103,20 @@ def _tiled_mlp_lora_alpha_from_env() -> float:
   return alpha if alpha > 0 else DEFAULT_TILED_MLP_LORA_ALPHA
 
 
+def _activation_policy_from_env() -> str:
+  value = os.environ.get(ENV_ACTIVATION_POLICY, DEFAULT_ACTIVATION_POLICY)
+  value = value.strip().lower()
+  if value in {
+      "none",
+      "layer_remat",
+      "layer_offload",
+      "split_remat",
+      "split_offload",
+  }:
+    return value
+  return DEFAULT_ACTIVATION_POLICY
+
+
 def _patch_cce(module: ModuleType | None = None) -> None:
   if not _env_enabled() or _env_bool(ENV_DISABLE_CE, default=False):
     return
@@ -129,9 +153,71 @@ def _patch_gemma3_tiled_mlp(module: ModuleType | None = None) -> None:
   setattr(target, "_tunix_accel_tiled_mlp_autopatched", True)
 
 
+def _patch_gemma3_activation_policy(module: ModuleType | None = None) -> None:
+  if (
+      not _env_enabled()
+      or _env_bool(ENV_DISABLE_ACTIVATION_POLICY, default=False)
+  ):
+    return
+  policy = _activation_policy_from_env()
+  if policy == "none":
+    return
+  target = module or sys.modules.get(GEMMA3_TARGET_MODULE)
+  if target is None or getattr(
+      target,
+      "_tunix_accel_activation_policy_autopatched",
+      False,
+  ):
+    return
+
+  from tunix_accel import gemma3_activation_policy  # pylint: disable=import-outside-toplevel
+
+  gemma3_activation_policy.install(
+      policy=policy,
+      prevent_cse=_env_bool(ENV_ACTIVATION_PREVENT_CSE, default=True),
+      offload_src=os.environ.get(
+          ENV_ACTIVATION_OFFLOAD_SRC,
+          DEFAULT_ACTIVATION_OFFLOAD_SRC,
+      ),
+      offload_dst=os.environ.get(
+          ENV_ACTIVATION_OFFLOAD_DST,
+          DEFAULT_ACTIVATION_OFFLOAD_DST,
+      ),
+  )
+  setattr(target, "_tunix_accel_activation_policy_autopatched", True)
+
+
+def _patch_gemma3_splash_attention(module: ModuleType | None = None) -> None:
+  if not _env_enabled() or not _env_bool(
+      ENV_ENABLE_SPLASH_ATTENTION,
+      default=False,
+  ):
+    return
+  target = module or sys.modules.get(GEMMA3_TARGET_MODULE)
+  if target is None or getattr(
+      target,
+      "_tunix_accel_splash_attention_autopatched",
+      False,
+  ):
+    return
+
+  from tunix_accel import gemma3_splash_attention  # pylint: disable=import-outside-toplevel
+
+  gemma3_splash_attention.install(
+      interpret=_env_bool(ENV_SPLASH_ATTENTION_INTERPRET, default=False),
+  )
+  setattr(target, "_tunix_accel_splash_attention_autopatched", True)
+
+
+def _patch_gemma3(module: ModuleType | None = None) -> None:
+  _patch_gemma3_splash_attention(module)
+  _patch_gemma3_tiled_mlp(module)
+  _patch_gemma3_activation_policy(module)
+
+
 _PATCHERS = {
     CCE_TARGET_MODULE: _patch_cce,
-    GEMMA3_TARGET_MODULE: _patch_gemma3_tiled_mlp,
+    GEMMA3_TARGET_MODULE: _patch_gemma3,
 }
 
 

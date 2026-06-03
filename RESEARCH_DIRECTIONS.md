@@ -12,9 +12,10 @@ feature usable as a Tunix drop-in patch where possible.
 | --- | --- | --- |
 | `01-CCE` | Done | Replaced dense LM-head cross entropy with Cut Cross Entropy, reducing the Gemma3 270M EN-FR b16 train-step XLA peak from 10.21 GiB to 2.21 GiB with eval-loss and BLEU parity. |
 | `02-PACKING` | Done | Added uncontaminated sequence packing; on OPUS100 EN-FR it recovered padding waste and produced 20x+ useful target-token throughput in short Gemma runs. |
-| `03-TILED-MLP` | Started | Added a JAX custom-VJP gated-MLP prototype and a Gemma3-only Tunix `FeedForward.block` patch. Dense forward/gradient/JIT, tiny Gemma3 block, remat path, and default-loss parity pass locally. TPU memory profiles remain open. |
+| `03-TILED-MLP` | Done | Added a Gemma3-only tiled gated-MLP patch. On Gemma3 4B LoRA v5litepod-8, the L4096 keypoint moved from Default MLP compile OOM to Tiled MLP completion. |
+| `04-ACTIVATION-POLICY` | Done | Added an opt-in Gemma3 decoder-layer remat/offload policy. Plain `split_remat` did not help the L4096 boundary, but `split_offload` moved Default CE/no-policy from compile OOM at 177.3 GiB aggregate planned HBM to completion at 115.2 GiB. |
 
-## 03 Active: Tiled / Fused MLP
+## Completed: Tiled / Fused MLP
 
 **Scope:** Gemma3-only until proven otherwise. The kernel math is generic for
 gated MLPs, but the drop-in adapter should first target Tunix Gemma3 modules and
@@ -46,7 +47,23 @@ bottleneck.
 - The Gemma3 adapter may not generalize to Llama/Qwen-style SwiGLU or GeGLU
   layouts without separate work.
 
-## 04 Candidate: Fused QK RoPE
+## Completed: Activation Memory Policy
+
+Gradient checkpointing, rematerialization, and activation offloading are not a
+custom-kernel target in the same way CCE or Tiled MLP are. JAX already provides
+`jax.checkpoint`, `flax.nnx.remat`, checkpoint policies, checkpoint names, and
+host offloading. The workstream still produced a useful Gemma3 drop-in:
+
+- `split_remat` confirmed that recompute-only policy changes did not move the
+  Gemma3 4B L4096 boundary.
+- `split_offload` showed that explicit named residual offload can reduce HBM
+  residency enough to fit the same L4096 training shape.
+- The right default remains opt-in because offload buys memory with slower
+  steps and longer compile/dispatch behavior.
+
+The retained report is `04-ACTIVATION-POLICY/TECHNICAL_REPORT.md`.
+
+## 05 Candidate: Fused QK RoPE
 
 **Why it matters:** Unsloth explicitly advertises fused QK RoPE kernels, with
 packing support, as part of its faster-training path. This is one of the most
@@ -73,7 +90,7 @@ plain XLA lowering still leaves measurable memory traffic or launch overhead.
 - The implementation may become model-specific around RoPE layout, grouped
   query attention, and position handling.
 
-## 05 Candidate: Fused LoRA Projections / Backward
+## 06 Candidate: Fused LoRA Projections / Backward
 
 **Why it matters:** Unsloth's earlier speed and memory gains are strongly tied
 to custom LoRA kernels. A fused LoRA path could reduce memory traffic around
@@ -98,7 +115,7 @@ fine-tuning should remain outside the first milestone.
 - Qwix/NNX LoRA interception and Tunix trainer internals may change, making the
   patch fragile across model families.
 
-## 06 Candidate: RMSNorm / SwiGLU / GeGLU Fused Kernels
+## 07 Candidate: RMSNorm / SwiGLU / GeGLU Fused Kernels
 
 **Why it matters:** Unsloth ships optimized kernels for normalization and MLP
 activation families. These are plausible memory-traffic reductions, but they are
@@ -121,21 +138,3 @@ lower-priority research notes.
 - XLA fusion can make hand-written replacements unnecessary.
 - These kernels may improve step time but are less likely than CCE or Tiled MLP
   to produce a dramatic max-context or peak-memory story.
-
-## Supporting Baseline: Activation Memory Policy
-
-Gradient checkpointing, rematerialization, and activation offloading are not a
-separate "custom kernel" target by themselves. JAX already provides
-`jax.checkpoint`, `jax.remat`, checkpoint policies, checkpoint names, and host
-offloading. They should still be tracked as baselines or combinations:
-
-- Default Tunix remat
-- Tunix block remat
-- CCE + existing remat
-- CCE + Tiled MLP + existing remat
-- Optional named activation offload if profiling shows device HBM is still
-  dominated by saved activations
-
-The research question is not whether remat exists. It is whether a
-Tunix/Gemma-specific activation policy beats the existing JAX/Tunix remat plan
-enough to justify another drop-in patch.

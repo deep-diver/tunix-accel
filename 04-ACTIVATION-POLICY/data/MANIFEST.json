@@ -1,0 +1,23 @@
+{
+  "model": "gemma3-4b-it",
+  "tpu": "v5litepod-8",
+  "chips": 8,
+  "mesh": "fsdp=8,tp=1",
+  "hbm_limit_gib_per_chip": 15.75,
+  "hbm_limit_gib_aggregate": 126.0,
+  "rows": 4,
+  "scope": "Default CE before/after only; CCE composition rows are raw artifacts, not headline comparisons.",
+  "figures": [
+    "assets/gemma3_4b_activation_hbm_headroom.png",
+    "assets/gemma3_4b_activation_before_after_memory.png",
+    "assets/gemma3_4b_l4096_activation_frontier.png",
+    "assets/gemma3_4b_l2048_activation_tradeoff.png",
+    "assets/gemma3_small_model_activation_followup.png"
+  ],
+  "parity": "data/gemma3_4b_activation_policy_parity.json",
+  "small_model_followup": {
+    "summary": "data/gemma3_small_model_activation_followup.csv",
+    "raw": "results/small-model-splash-activation-ablation/",
+    "scope": "Gemma3 270M on v5litepod-1 and Gemma3 1B on v5litepod-4; CCE + Tiled MLP + Splash Attention requested; activation policy none vs split_offload. Long-context OOM logs still expose dense attention allocations, so these are adapter-coverage diagnostics."
+  }
+}
