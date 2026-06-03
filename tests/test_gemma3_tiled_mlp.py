@@ -55,6 +55,20 @@ def _randomize_mlp(model) -> None:
       ) / scale
 
 
+def _randomize_lora_b(model) -> None:
+  keys = iter(jax.random.split(jax.random.key(456), 3 * len(model.layers)))
+  for layer in model.layers:
+    for name in ("gate_proj", "up_proj", "down_proj"):
+      projection = getattr(layer.mlp, name)
+      key = next(keys)
+      if hasattr(projection, "kernel_lora_b"):
+        projection.kernel_lora_b[...] = jax.random.normal(
+            key,
+            projection.kernel_lora_b.shape,
+            dtype=jnp.float32,
+        ) / jnp.sqrt(jnp.asarray(projection.kernel_lora_b.shape[0], dtype=jnp.float32))
+
+
 def _batch():
   tokens = jnp.array(
       [[1, 2, 3, 4, 5, 6, 7, 8], [8, 7, 6, 5, 4, 3, 2, 1]],
@@ -116,8 +130,9 @@ def test_gemma3_default_loss_matches_with_tiled_mlp_patch():
   assert jnp.allclose(actual, expected, atol=2e-5, rtol=2e-5)
 
 
-def test_gemma3_tiled_mlp_lora_fallback_and_strict_error():
+def test_gemma3_tiled_mlp_matches_qwix_lora_projection_deltas():
   base_model = _tiny_model()
+  _randomize_mlp(base_model)
   provider = qwix.LoraProvider(
       module_path=".*gate_proj|.*up_proj|.*down_proj",
       rank=4,
@@ -129,19 +144,40 @@ def test_gemma3_tiled_mlp_lora_fallback_and_strict_error():
       **base_model.get_model_input(),
       rngs=nnx.Rngs(1),
   )
-  x = jax.random.normal(jax.random.key(2), (2, 7, model.config.embed_dim))
-  expected = model.layers[0].mlp.block(x)
+  _randomize_lora_b(model)
+  tokens, input_mask, positions, attention_mask = _batch()
+  expected = peft_trainer._default_loss_fn(  # pylint: disable=protected-access
+      model,
+      tokens,
+      input_mask,
+      positions,
+      attention_mask,
+  )
 
   with gemma3_tiled_mlp.installed(
       token_chunk=3,
       fallback_to_original_on_lora=True,
+      lora_alpha=8,
   ):
-    actual = model.layers[0].mlp.block(x)
+    actual = peft_trainer._default_loss_fn(  # pylint: disable=protected-access
+        model,
+        tokens,
+        input_mask,
+        positions,
+        attention_mask,
+    )
   assert jnp.allclose(actual, expected, atol=2e-5, rtol=2e-5)
 
   with gemma3_tiled_mlp.installed(
       token_chunk=3,
       fallback_to_original_on_lora=False,
+      lora_alpha=8,
   ):
-    with pytest.raises(TypeError, match="Qwix-LoRA"):
-      model.layers[0].mlp.block(x)
+    actual = peft_trainer._default_loss_fn(  # pylint: disable=protected-access
+        model,
+        tokens,
+        input_mask,
+        positions,
+        attention_mask,
+    )
+  assert jnp.allclose(actual, expected, atol=2e-5, rtol=2e-5)

@@ -58,6 +58,10 @@ def configure_autopatch_env(args: argparse.Namespace) -> None:
       "TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK",
       str(args.tiled_mlp_token_chunk),
   )
+  os.environ.setdefault(
+      "TUNIX_ACCEL_TILED_MLP_LORA_ALPHA",
+      str(args.lora_alpha),
+  )
   if args.mlp_variant == "default":
     os.environ["TUNIX_ACCEL_DISABLE_TILED_MLP"] = "1"
   else:
@@ -106,7 +110,7 @@ def enrich_summary(
       ),
       "training_mode": "full-parameter"
       if args.lora_rank == 0
-      else "lora-fallback",
+      else "lora",
       "env": {
           "TUNIX_ACCEL_DISABLE_AUTOPATCH": os.environ.get(
               "TUNIX_ACCEL_DISABLE_AUTOPATCH",
@@ -119,6 +123,10 @@ def enrich_summary(
           ),
           "TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK": os.environ.get(
               "TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK",
+              "",
+          ),
+          "TUNIX_ACCEL_TILED_MLP_LORA_ALPHA": os.environ.get(
+              "TUNIX_ACCEL_TILED_MLP_LORA_ALPHA",
               "",
           ),
       },
@@ -164,7 +172,7 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument(
       "--allow-lora-fallback",
       action="store_true",
-      help="Allow LoRA runs, where tiled MLP intentionally falls back to Tunix.",
+      help="Deprecated compatibility flag; LoRA is supported by the tiled MLP patch.",
   )
   parser.add_argument(
       "--packing-strategy",
@@ -196,12 +204,6 @@ def parse_args() -> argparse.Namespace:
   preset_model_id, preset_model_path = MODEL_PRESETS[args.model_size]
   args.model_id = args.model_id or preset_model_id
   args.model_path = args.model_path or preset_model_path
-  if args.lora_rank > 0 and not args.allow_lora_fallback:
-    raise ValueError(
-        "The tiled MLP patch currently targets non-LoRA projection kernels. "
-        "Use --lora-rank 0 for an effective comparison, or pass "
-        "--allow-lora-fallback to record an intentional fallback run."
-    )
   return args
 
 

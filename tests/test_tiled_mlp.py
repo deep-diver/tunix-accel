@@ -12,8 +12,10 @@ import jax.numpy as jnp
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tunix_accel.tiled_mlp import dense_gated_mlp
+from tunix_accel.tiled_mlp import dense_lora_gated_mlp
 from tunix_accel.tiled_mlp import estimate_gated_mlp_intermediate_bytes
 from tunix_accel.tiled_mlp import tiled_gated_mlp
+from tunix_accel.tiled_mlp import tiled_lora_gated_mlp
 
 
 def _inputs():
@@ -120,6 +122,45 @@ def test_tiled_gated_mlp_jit_gradients_match_dense():
 
   assert jnp.allclose(tiled_value, dense_value, atol=2e-5, rtol=2e-5)
   _tree_allclose(tiled_grads, dense_grads, atol=4e-5, rtol=4e-5)
+
+
+def test_tiled_lora_gated_mlp_gradients_match_dense_lora():
+  hidden, gate, up, down = _inputs()
+  key = jax.random.key(7)
+  keys = iter(jax.random.split(key, 6))
+  rank = 3
+  gate_a = jax.random.normal(next(keys), (gate.shape[0], rank), dtype=jnp.float32) * 0.1
+  gate_b = jax.random.normal(next(keys), (rank, gate.shape[1]), dtype=jnp.float32) * 0.1
+  up_a = jax.random.normal(next(keys), (up.shape[0], rank), dtype=jnp.float32) * 0.1
+  up_b = jax.random.normal(next(keys), (rank, up.shape[1]), dtype=jnp.float32) * 0.1
+  down_a = jax.random.normal(next(keys), (down.shape[0], rank), dtype=jnp.float32) * 0.1
+  down_b = jax.random.normal(next(keys), (rank, down.shape[1]), dtype=jnp.float32) * 0.1
+
+  def dense_loss(*args):
+    out = dense_lora_gated_mlp(
+        *args,
+        lora_scale=2.0,
+        activation="gelu_approx",
+    )
+    return jnp.mean(jnp.square(out))
+
+  def tiled_loss(*args):
+    out = tiled_lora_gated_mlp(
+        *args,
+        token_chunk=4,
+        lora_scale=2.0,
+        activation="gelu_approx",
+    )
+    return jnp.mean(jnp.square(out))
+
+  args = (hidden, gate, gate_a, gate_b, up, up_a, up_b, down, down_a, down_b)
+  assert jnp.allclose(tiled_loss(*args), dense_loss(*args), atol=2e-5, rtol=2e-5)
+  _tree_allclose(
+      jax.grad(tiled_loss, argnums=tuple(range(len(args))))(*args),
+      jax.grad(dense_loss, argnums=tuple(range(len(args))))(*args),
+      atol=4e-5,
+      rtol=4e-5,
+  )
 
 
 def test_estimate_gated_mlp_intermediate_bytes():

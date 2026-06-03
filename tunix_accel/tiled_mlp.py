@@ -129,6 +129,48 @@ def dense_gated_mlp(
   return _linear(intermediate, down_kernel)
 
 
+def _linear_lora(
+    x: Array,
+    kernel: Array,
+    lora_a: Array,
+    lora_b: Array,
+    lora_scale: float,
+) -> Array:
+  base = _linear(x, kernel)
+  delta = _linear(_linear(x, lora_a), lora_b)
+  return base + delta * jnp.asarray(lora_scale, dtype=base.dtype)
+
+
+def dense_lora_gated_mlp(
+    hidden: Array,
+    gate_kernel: Array,
+    gate_lora_a: Array,
+    gate_lora_b: Array,
+    up_kernel: Array,
+    up_lora_a: Array,
+    up_lora_b: Array,
+    down_kernel: Array,
+    down_lora_a: Array,
+    down_lora_b: Array,
+    *,
+    lora_scale: float,
+    activation: Activation = "silu",
+) -> Array:
+  """Dense reference implementation for a LoRA-wrapped gated MLP block."""
+  activation = _validate_activation(activation)
+  _check_shapes(hidden, gate_kernel, up_kernel, down_kernel)
+  gate = _linear_lora(hidden, gate_kernel, gate_lora_a, gate_lora_b, lora_scale)
+  up = _linear_lora(hidden, up_kernel, up_lora_a, up_lora_b, lora_scale)
+  intermediate = _activation(gate, activation) * up
+  return _linear_lora(
+      intermediate,
+      down_kernel,
+      down_lora_a,
+      down_lora_b,
+      lora_scale,
+  )
+
+
 def _token_axis(hidden: Array) -> int:
   if hidden.ndim < 2:
     raise ValueError(f"hidden must be rank >= 2, got shape {hidden.shape}.")
@@ -333,6 +375,217 @@ def tiled_gated_mlp(
       token_chunk=token_chunk,
       activation=activation,
   )(hidden, gate_kernel, up_kernel, down_kernel)
+
+
+@lru_cache(maxsize=32)
+def make_tiled_lora_gated_mlp(
+    token_chunk: int = 128,
+    *,
+    activation: Activation = "silu",
+    lora_scale: float = 1.0,
+) -> Callable[
+    [Array, Array, Array, Array, Array, Array, Array, Array, Array, Array],
+    Array,
+]:
+  """Returns a tiled custom-VJP gated MLP for LoRA-wrapped projections."""
+  token_chunk = _validate_token_chunk(token_chunk)
+  activation = _validate_activation(activation)
+  lora_scale = float(lora_scale)
+
+  @jax.custom_vjp
+  def tiled_lora_gated_mlp(
+      hidden: Array,
+      gate_kernel: Array,
+      gate_lora_a: Array,
+      gate_lora_b: Array,
+      up_kernel: Array,
+      up_lora_a: Array,
+      up_lora_b: Array,
+      down_kernel: Array,
+      down_lora_a: Array,
+      down_lora_b: Array,
+  ) -> Array:
+    return dense_lora_gated_mlp(
+        hidden,
+        gate_kernel,
+        gate_lora_a,
+        gate_lora_b,
+        up_kernel,
+        up_lora_a,
+        up_lora_b,
+        down_kernel,
+        down_lora_a,
+        down_lora_b,
+        lora_scale=lora_scale,
+        activation=activation,
+    )
+
+  def fwd(
+      hidden: Array,
+      gate_kernel: Array,
+      gate_lora_a: Array,
+      gate_lora_b: Array,
+      up_kernel: Array,
+      up_lora_a: Array,
+      up_lora_b: Array,
+      down_kernel: Array,
+      down_lora_a: Array,
+      down_lora_b: Array,
+  ):
+    out = dense_lora_gated_mlp(
+        hidden,
+        gate_kernel,
+        gate_lora_a,
+        gate_lora_b,
+        up_kernel,
+        up_lora_a,
+        up_lora_b,
+        down_kernel,
+        down_lora_a,
+        down_lora_b,
+        lora_scale=lora_scale,
+        activation=activation,
+    )
+    hidden_padded, n_tokens, original_shape = _flatten_and_pad(hidden, token_chunk)
+    return out, (
+        hidden_padded,
+        gate_kernel,
+        gate_lora_a,
+        gate_lora_b,
+        up_kernel,
+        up_lora_a,
+        up_lora_b,
+        down_kernel,
+        down_lora_a,
+        down_lora_b,
+        n_tokens,
+        original_shape,
+    )
+
+  def bwd(residual, grad_out: Array):
+    (
+        hidden_padded,
+        gate_kernel,
+        gate_lora_a,
+        gate_lora_b,
+        up_kernel,
+        up_lora_a,
+        up_lora_b,
+        down_kernel,
+        down_lora_a,
+        down_lora_b,
+        n_tokens,
+        original_shape,
+    ) = residual
+    grad_out_padded, _ = _pad_flat_tokens(grad_out, token_chunk)
+    token_chunks = _token_axis_length(hidden_padded) // token_chunk
+
+    init = (
+        jnp.zeros_like(hidden_padded),
+        jnp.zeros_like(gate_kernel),
+        jnp.zeros_like(gate_lora_a),
+        jnp.zeros_like(gate_lora_b),
+        jnp.zeros_like(up_kernel),
+        jnp.zeros_like(up_lora_a),
+        jnp.zeros_like(up_lora_b),
+        jnp.zeros_like(down_kernel),
+        jnp.zeros_like(down_lora_a),
+        jnp.zeros_like(down_lora_b),
+    )
+
+    def body(i: Array, state):
+      start = i * token_chunk
+      x = _slice_token_tile(hidden_padded, start, token_chunk)
+      go = _slice_token_tile(grad_out_padded, start, token_chunk)
+
+      def tile_fn(
+          tile_x,
+          tile_gate,
+          tile_gate_a,
+          tile_gate_b,
+          tile_up,
+          tile_up_a,
+          tile_up_b,
+          tile_down,
+          tile_down_a,
+          tile_down_b,
+      ):
+        return dense_lora_gated_mlp(
+            tile_x,
+            tile_gate,
+            tile_gate_a,
+            tile_gate_b,
+            tile_up,
+            tile_up_a,
+            tile_up_b,
+            tile_down,
+            tile_down_a,
+            tile_down_b,
+            lora_scale=lora_scale,
+            activation=activation,
+        )
+
+      _, pullback = jax.vjp(
+          tile_fn,
+          x,
+          gate_kernel,
+          gate_lora_a,
+          gate_lora_b,
+          up_kernel,
+          up_lora_a,
+          up_lora_b,
+          down_kernel,
+          down_lora_a,
+          down_lora_b,
+      )
+      grads = pullback(go)
+      gh = _update_token_tile(state[0], grads[0].astype(state[0].dtype), start)
+      accum = [gh]
+      for acc, grad in zip(state[1:], grads[1:], strict=True):
+        accum.append(acc + grad.astype(acc.dtype))
+      return tuple(accum)
+
+    grads = jax.lax.fori_loop(0, token_chunks, body, init)
+    grad_hidden = _trim_token_axis(grads[0], n_tokens).reshape(original_shape)
+    return (grad_hidden, *grads[1:])
+
+  tiled_lora_gated_mlp.defvjp(fwd, bwd)
+  return tiled_lora_gated_mlp
+
+
+def tiled_lora_gated_mlp(
+    hidden: Array,
+    gate_kernel: Array,
+    gate_lora_a: Array,
+    gate_lora_b: Array,
+    up_kernel: Array,
+    up_lora_a: Array,
+    up_lora_b: Array,
+    down_kernel: Array,
+    down_lora_a: Array,
+    down_lora_b: Array,
+    *,
+    token_chunk: int = 128,
+    activation: Activation = "silu",
+    lora_scale: float = 1.0,
+) -> Array:
+  """Computes a LoRA-wrapped gated MLP by streaming the token dimension."""
+  return make_tiled_lora_gated_mlp(
+      token_chunk=token_chunk,
+      activation=activation,
+      lora_scale=float(lora_scale),
+  )(
+      hidden,
+      gate_kernel,
+      gate_lora_a,
+      gate_lora_b,
+      up_kernel,
+      up_lora_a,
+      up_lora_b,
+      down_kernel,
+      down_lora_a,
+      down_lora_b,
+  )
 
 
 def estimate_gated_mlp_intermediate_bytes(

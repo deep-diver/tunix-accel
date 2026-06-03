@@ -10,6 +10,7 @@ from flax import nnx
 import jax
 
 from tunix_accel.tiled_mlp import tiled_gated_mlp
+from tunix_accel.tiled_mlp import tiled_lora_gated_mlp
 
 
 @dataclass
@@ -18,6 +19,7 @@ class _PatchState:
   original_block: Any | None = None
   token_chunk: int = 128
   fallback_to_original_on_lora: bool = True
+  lora_alpha: float = 32.0
 
 
 _STATE = _PatchState()
@@ -55,6 +57,33 @@ def _projection_kernel(module: nnx.Module, name: str):
   return projection.kernel[...]
 
 
+def _projection_lora(module: nnx.Module, name: str):
+  projection = getattr(module, name)
+  if getattr(projection, "bias", None) is not None:
+    raise TypeError(
+        f"Gemma3 tiled MLP only supports bias-free projections; {name} has bias."
+    )
+  if not hasattr(projection, "kernel_lora_a") or not hasattr(
+      projection, "kernel_lora_b"
+  ):
+    raise TypeError(f"{name} does not expose Qwix LoRA projection params.")
+  return (
+      projection.kernel[...],
+      projection.kernel_lora_a[...],
+      projection.kernel_lora_b[...],
+  )
+
+
+def _lora_scale(*lora_as) -> float:
+  ranks = {int(lora_a.shape[-1]) for lora_a in lora_as}
+  if len(ranks) != 1:
+    raise TypeError(f"Expected a single LoRA rank across MLP projections, got {ranks}.")
+  rank = next(iter(ranks))
+  if rank <= 0:
+    raise TypeError(f"LoRA rank must be positive, got {rank}.")
+  return float(_STATE.lora_alpha) / float(rank)
+
+
 def _tiled_block(self, x):  # pylint: disable=protected-access
   if not _is_supported_gemma3_mlp(self):
     if _STATE.original_block is not None:
@@ -62,12 +91,29 @@ def _tiled_block(self, x):  # pylint: disable=protected-access
     raise TypeError(f"Unsupported Gemma3 MLP module: {type(self)}")
 
   if _has_projection_lora(self):
-    if _STATE.fallback_to_original_on_lora and _STATE.original_block is not None:
-      return _STATE.original_block(self, x)
-    raise TypeError(
-        "Gemma3 tiled MLP does not support Qwix-LoRA projection deltas yet. "
-        "Use fallback_to_original_on_lora=True or disable the tiled MLP patch "
-        "for LoRA runs."
+    try:
+      gate_kernel, gate_lora_a, gate_lora_b = _projection_lora(self, "gate_proj")
+      up_kernel, up_lora_a, up_lora_b = _projection_lora(self, "up_proj")
+      down_kernel, down_lora_a, down_lora_b = _projection_lora(self, "down_proj")
+    except TypeError:
+      if _STATE.fallback_to_original_on_lora and _STATE.original_block is not None:
+        return _STATE.original_block(self, x)
+      raise
+
+    return tiled_lora_gated_mlp(
+        x,
+        gate_kernel,
+        gate_lora_a,
+        gate_lora_b,
+        up_kernel,
+        up_lora_a,
+        up_lora_b,
+        down_kernel,
+        down_lora_a,
+        down_lora_b,
+        token_chunk=_STATE.token_chunk,
+        activation="gelu_approx",
+        lora_scale=_lora_scale(gate_lora_a, up_lora_a, down_lora_a),
     )
 
   return tiled_gated_mlp(
@@ -84,6 +130,7 @@ def install(
     *,
     token_chunk: int = 128,
     fallback_to_original_on_lora: bool = True,
+    lora_alpha: float = 32.0,
 ) -> None:
   """Installs a process-local tiled MLP override for Tunix Gemma3.
 
@@ -104,6 +151,7 @@ def install(
 
   _STATE.token_chunk = int(token_chunk)
   _STATE.fallback_to_original_on_lora = bool(fallback_to_original_on_lora)
+  _STATE.lora_alpha = float(lora_alpha)
 
 
 def uninstall() -> None:
@@ -126,14 +174,17 @@ def installed(
     *,
     token_chunk: int = 128,
     fallback_to_original_on_lora: bool = True,
+    lora_alpha: float = 32.0,
 ):
   """Context manager form of `install()`."""
   was_installed = _STATE.installed
   old_token_chunk = _STATE.token_chunk
   old_fallback = _STATE.fallback_to_original_on_lora
+  old_lora_alpha = _STATE.lora_alpha
   install(
       token_chunk=token_chunk,
       fallback_to_original_on_lora=fallback_to_original_on_lora,
+      lora_alpha=lora_alpha,
   )
   try:
     yield
@@ -142,12 +193,13 @@ def installed(
       install(
           token_chunk=old_token_chunk,
           fallback_to_original_on_lora=old_fallback,
+          lora_alpha=old_lora_alpha,
       )
     else:
       uninstall()
 
 
-def validate_gemma3_model(model: nnx.Module, *, require_no_lora: bool = True) -> None:
+def validate_gemma3_model(model: nnx.Module, *, require_no_lora: bool = False) -> None:
   """Validates that a model is compatible with the first Gemma3 tiled-MLP patch."""
   if not hasattr(model, "layers"):
     raise TypeError(f"Expected a Tunix Gemma3-like model with layers, got {type(model)}")
@@ -158,5 +210,5 @@ def validate_gemma3_model(model: nnx.Module, *, require_no_lora: bool = True) ->
     if require_no_lora and _has_projection_lora(mlp):
       raise TypeError(
           f"Layer {index} has LoRA projection params; Gemma3 tiled MLP currently "
-          "supports full-parameter/frozen-base projection kernels only."
+          "was asked to reject LoRA projection kernels."
       )

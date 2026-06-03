@@ -25,9 +25,11 @@ ENV_VOCAB_CHUNK = "TUNIX_ACCEL_CE_VOCAB_CHUNK"
 ENV_DISABLE_TILED_MLP = "TUNIX_ACCEL_DISABLE_TILED_MLP"
 ENV_TILED_MLP_TOKEN_CHUNK = "TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK"
 ENV_TILED_MLP_FALLBACK_ON_LORA = "TUNIX_ACCEL_TILED_MLP_FALLBACK_ON_LORA"
+ENV_TILED_MLP_LORA_ALPHA = "TUNIX_ACCEL_TILED_MLP_LORA_ALPHA"
 DEFAULT_TOKEN_CHUNK = 128
 DEFAULT_VOCAB_CHUNK = 8192
 DEFAULT_TILED_MLP_TOKEN_CHUNK = 128
+DEFAULT_TILED_MLP_LORA_ALPHA = 32.0
 
 
 def _env_enabled() -> bool:
@@ -80,6 +82,17 @@ def _tiled_mlp_token_chunk_from_env() -> int:
   return token_chunk if token_chunk > 0 else DEFAULT_TILED_MLP_TOKEN_CHUNK
 
 
+def _tiled_mlp_lora_alpha_from_env() -> float:
+  raw = os.environ.get(ENV_TILED_MLP_LORA_ALPHA)
+  if not raw:
+    return DEFAULT_TILED_MLP_LORA_ALPHA
+  try:
+    alpha = float(raw)
+  except ValueError:
+    return DEFAULT_TILED_MLP_LORA_ALPHA
+  return alpha if alpha > 0 else DEFAULT_TILED_MLP_LORA_ALPHA
+
+
 def _patch_cce(module: ModuleType | None = None) -> None:
   if not _env_enabled() or _env_bool(ENV_DISABLE_CE, default=False):
     return
@@ -111,6 +124,7 @@ def _patch_gemma3_tiled_mlp(module: ModuleType | None = None) -> None:
           ENV_TILED_MLP_FALLBACK_ON_LORA,
           default=True,
       ),
+      lora_alpha=_tiled_mlp_lora_alpha_from_env(),
   )
   setattr(target, "_tunix_accel_tiled_mlp_autopatched", True)
 
