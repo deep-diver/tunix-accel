@@ -8,9 +8,9 @@ from typing import Any
 
 from flax import nnx
 import jax
+import jax.numpy as jnp
 
 from tunix_accel.tiled_mlp import tiled_gated_mlp
-from tunix_accel.tiled_mlp import tiled_lora_gated_mlp
 
 
 @dataclass
@@ -57,38 +57,47 @@ def _projection_kernel(module: nnx.Module, name: str):
   return projection.kernel[...]
 
 
-def _projection_lora(module: nnx.Module, name: str):
-  projection = getattr(module, name)
-  if getattr(projection, "bias", None) is not None:
-    raise TypeError(
-        f"Gemma3 tiled MLP only supports bias-free projections; {name} has bias."
-    )
-  if not hasattr(projection, "kernel_lora_a") or not hasattr(
-      projection, "kernel_lora_b"
-  ):
-    raise TypeError(f"{name} does not expose Qwix LoRA projection params.")
-  return (
-      projection.kernel[...],
-      projection.kernel_lora_a[...],
-      projection.kernel_lora_b[...],
-  )
-
-
-def _lora_scale(*lora_as) -> float:
-  ranks = {int(lora_a.shape[-1]) for lora_a in lora_as}
-  if len(ranks) != 1:
-    raise TypeError(f"Expected a single LoRA rank across MLP projections, got {ranks}.")
-  rank = next(iter(ranks))
-  if rank <= 0:
-    raise TypeError(f"LoRA rank must be positive, got {rank}.")
-  return float(_STATE.lora_alpha) / float(rank)
-
-
 def _intermediate_sharding(module: nnx.Module) -> tuple[str | None, ...] | None:
   try:
     return tuple(module.config.shd_config.act_btf)
   except AttributeError:
     return None
+
+
+def _loop_tiled_original_block(module: nnx.Module, x):
+  """Tiles Gemma's original block while preserving projection/provider semantics."""
+  if _STATE.original_block is None:
+    raise RuntimeError("Gemma3 tiled MLP patch is missing the original block.")
+  axis = x.ndim - 2
+  n_tokens = int(x.shape[axis])
+  token_chunk = min(_STATE.token_chunk, n_tokens)
+  chunks = (n_tokens + token_chunk - 1) // token_chunk
+  padded_tokens = chunks * token_chunk
+  pad_tokens = padded_tokens - n_tokens
+  if pad_tokens:
+    pad_width = [(0, 0)] * x.ndim
+    pad_width[axis] = (0, pad_tokens)
+    x_padded = jnp.pad(x, pad_width)
+  else:
+    x_padded = x
+  out_padded = jnp.zeros_like(x_padded)
+
+  def body(i, out):
+    start = i * token_chunk
+    starts = [0] * x_padded.ndim
+    starts[axis] = start
+    sizes = list(x_padded.shape)
+    sizes[axis] = token_chunk
+    tile = jax.lax.dynamic_slice(x_padded, tuple(starts), tuple(sizes))
+    tile_out = _STATE.original_block(module, tile)
+    return jax.lax.dynamic_update_slice(out, tile_out, tuple(starts))
+
+  out_padded = jax.lax.fori_loop(0, chunks, body, out_padded)
+  if not pad_tokens:
+    return out_padded
+  index = [slice(None)] * x.ndim
+  index[axis] = slice(0, n_tokens)
+  return out_padded[tuple(index)]
 
 
 def _tiled_block(self, x):  # pylint: disable=protected-access
@@ -98,31 +107,7 @@ def _tiled_block(self, x):  # pylint: disable=protected-access
     raise TypeError(f"Unsupported Gemma3 MLP module: {type(self)}")
 
   if _has_projection_lora(self):
-    try:
-      gate_kernel, gate_lora_a, gate_lora_b = _projection_lora(self, "gate_proj")
-      up_kernel, up_lora_a, up_lora_b = _projection_lora(self, "up_proj")
-      down_kernel, down_lora_a, down_lora_b = _projection_lora(self, "down_proj")
-    except TypeError:
-      if _STATE.fallback_to_original_on_lora and _STATE.original_block is not None:
-        return _STATE.original_block(self, x)
-      raise
-
-    return tiled_lora_gated_mlp(
-        x,
-        gate_kernel,
-        gate_lora_a,
-        gate_lora_b,
-        up_kernel,
-        up_lora_a,
-        up_lora_b,
-        down_kernel,
-        down_lora_a,
-        down_lora_b,
-        token_chunk=_STATE.token_chunk,
-        activation="gelu_approx",
-        lora_scale=_lora_scale(gate_lora_a, up_lora_a, down_lora_a),
-        intermediate_sharding=_intermediate_sharding(self),
-    )
+    return _loop_tiled_original_block(self, x)
 
   return tiled_gated_mlp(
       x,
