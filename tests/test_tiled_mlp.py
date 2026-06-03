@@ -131,5 +131,5 @@ def test_estimate_gated_mlp_intermediate_bytes():
       token_chunk=256,
   )
   assert estimate["dense_intermediate_bytes"] == 16 * 2048 * 8192 * 2
-  assert estimate["tiled_intermediate_bytes"] == 256 * 8192 * 2
+  assert estimate["tiled_intermediate_bytes"] == 16 * 256 * 8192 * 2
   assert estimate["estimated_reduction_bytes"] > 0

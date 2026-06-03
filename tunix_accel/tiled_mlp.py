@@ -103,6 +103,15 @@ def _check_shapes(
     )
 
 
+def _linear(x: Array, kernel: Array) -> Array:
+  return jax.lax.dot_general(
+      x,
+      kernel,
+      (((x.ndim - 1,), (0,)), ((), ())),
+      precision=None,
+  )
+
+
 def dense_gated_mlp(
     hidden: Array,
     gate_kernel: Array,
@@ -114,35 +123,71 @@ def dense_gated_mlp(
   """Dense reference implementation for a gated MLP block."""
   activation = _validate_activation(activation)
   _check_shapes(hidden, gate_kernel, up_kernel, down_kernel)
-  gate = jnp.matmul(hidden, gate_kernel)
-  up = jnp.matmul(hidden, up_kernel)
+  gate = _linear(hidden, gate_kernel)
+  up = _linear(hidden, up_kernel)
   intermediate = _activation(gate, activation) * up
-  return jnp.matmul(intermediate, down_kernel)
+  return _linear(intermediate, down_kernel)
+
+
+def _token_axis(hidden: Array) -> int:
+  if hidden.ndim < 2:
+    raise ValueError(f"hidden must be rank >= 2, got shape {hidden.shape}.")
+  return hidden.ndim - 2
+
+
+def _token_axis_length(x: Array) -> int:
+  return int(x.shape[_token_axis(x)])
+
+
+def _pad_token_axis(x: Array, token_chunk: int) -> tuple[Array, int]:
+  axis = _token_axis(x)
+  n_tokens = int(x.shape[axis])
+  chunks = (n_tokens + token_chunk - 1) // token_chunk
+  padded_n = chunks * token_chunk
+  pad_n = padded_n - n_tokens
+  if not pad_n:
+    return x, n_tokens
+  pad_width = [(0, 0)] * x.ndim
+  pad_width[axis] = (0, pad_n)
+  return jnp.pad(x, pad_width), n_tokens
+
+
+def _slice_token_tile(x: Array, start: Array, token_chunk: int) -> Array:
+  axis = _token_axis(x)
+  starts = [0] * x.ndim
+  starts[axis] = start
+  sizes = list(x.shape)
+  sizes[axis] = token_chunk
+  return jax.lax.dynamic_slice(x, tuple(starts), tuple(sizes))
+
+
+def _update_token_tile(acc: Array, tile: Array, start: Array) -> Array:
+  axis = _token_axis(acc)
+  starts = [0] * acc.ndim
+  starts[axis] = start
+  return jax.lax.dynamic_update_slice(acc, tile, tuple(starts))
+
+
+def _trim_token_axis(x: Array, n_tokens: int) -> Array:
+  axis = _token_axis(x)
+  index = [slice(None)] * x.ndim
+  index[axis] = slice(0, n_tokens)
+  return x[tuple(index)]
+
+
+def _kernel_grad(x: Array, y: Array) -> Array:
+  return jnp.einsum("...d,...h->dh", x, y)
 
 
 def _flatten_and_pad(hidden: Array, token_chunk: int) -> tuple[Array, int, tuple[int, ...]]:
+  """Deprecated compatibility wrapper for older callers."""
   original_shape = tuple(hidden.shape)
-  hidden_dim = original_shape[-1]
-  flat_hidden = hidden.reshape((-1, hidden_dim))
-  n_tokens = flat_hidden.shape[0]
-  chunks = (n_tokens + token_chunk - 1) // token_chunk
-  padded_n = chunks * token_chunk
-  pad_n = padded_n - n_tokens
-  if pad_n:
-    flat_hidden = jnp.pad(flat_hidden, ((0, pad_n), (0, 0)))
-  return flat_hidden, n_tokens, original_shape
+  padded, n_tokens = _pad_token_axis(hidden, token_chunk)
+  return padded, n_tokens, original_shape
 
 
 def _pad_flat_tokens(x: Array, token_chunk: int) -> tuple[Array, int]:
-  width = x.shape[-1]
-  flat = x.reshape((-1, width))
-  n_tokens = flat.shape[0]
-  chunks = (n_tokens + token_chunk - 1) // token_chunk
-  padded_n = chunks * token_chunk
-  pad_n = padded_n - n_tokens
-  if pad_n:
-    flat = jnp.pad(flat, ((0, pad_n), (0, 0)))
-  return flat, n_tokens
+  return _pad_token_axis(x, token_chunk)
 
 
 def _tile_forward(
@@ -152,11 +197,11 @@ def _tile_forward(
     down_kernel: Array,
     activation: Activation,
 ) -> tuple[Array, Array, Array, Array]:
-  gate = jnp.dot(x, gate_kernel)
-  up = jnp.dot(x, up_kernel)
+  gate = _linear(x, gate_kernel)
+  up = _linear(x, up_kernel)
   activated = _activation(gate, activation)
   intermediate = activated * up
-  out = jnp.dot(intermediate, down_kernel)
+  out = _linear(intermediate, down_kernel)
   return out, gate, up, intermediate
 
 
@@ -182,18 +227,17 @@ def make_tiled_gated_mlp(
       down_kernel: Array,
   ) -> Array:
     _check_shapes(hidden, gate_kernel, up_kernel, down_kernel)
-    flat_hidden, n_tokens, original_shape = _flatten_and_pad(hidden, token_chunk)
-    token_chunks = flat_hidden.shape[0] // token_chunk
+    hidden_padded, n_tokens, original_shape = _flatten_and_pad(hidden, token_chunk)
+    token_chunks = _token_axis_length(hidden_padded) // token_chunk
     output_dim = down_kernel.shape[-1]
-    out = jnp.zeros((flat_hidden.shape[0], output_dim), dtype=hidden.dtype)
+    out = jnp.zeros(
+        hidden_padded.shape[:-1] + (output_dim,),
+        dtype=hidden.dtype,
+    )
 
     def body(i: Array, acc: Array) -> Array:
       start = i * token_chunk
-      x = jax.lax.dynamic_slice(
-          flat_hidden,
-          (start, 0),
-          (token_chunk, flat_hidden.shape[-1]),
-      )
+      x = _slice_token_tile(hidden_padded, start, token_chunk)
       tile_out, _, _, _ = _tile_forward(
           x,
           gate_kernel,
@@ -201,10 +245,10 @@ def make_tiled_gated_mlp(
           down_kernel,
           activation,
       )
-      return jax.lax.dynamic_update_slice(acc, tile_out.astype(out.dtype), (start, 0))
+      return _update_token_tile(acc, tile_out.astype(out.dtype), start)
 
     out = jax.lax.fori_loop(0, token_chunks, body, out)
-    out = out[:n_tokens]
+    out = _trim_token_axis(out, n_tokens)
     return out.reshape(original_shape[:-1] + (output_dim,))
 
   def fwd(
@@ -214,9 +258,9 @@ def make_tiled_gated_mlp(
       down_kernel: Array,
   ):
     out = tiled_gated_mlp(hidden, gate_kernel, up_kernel, down_kernel)
-    flat_hidden, n_tokens, original_shape = _flatten_and_pad(hidden, token_chunk)
+    hidden_padded, n_tokens, original_shape = _flatten_and_pad(hidden, token_chunk)
     return out, (
-        flat_hidden,
+        hidden_padded,
         gate_kernel,
         up_kernel,
         down_kernel,
@@ -226,18 +270,17 @@ def make_tiled_gated_mlp(
 
   def bwd(residual, grad_out: Array):
     (
-        flat_hidden,
+        hidden_padded,
         gate_kernel,
         up_kernel,
         down_kernel,
         n_tokens,
         original_shape,
     ) = residual
-    flat_grad_out, _ = _pad_flat_tokens(grad_out, token_chunk)
-    token_chunks = flat_hidden.shape[0] // token_chunk
-    hidden_dim = flat_hidden.shape[-1]
+    grad_out_padded, _ = _pad_flat_tokens(grad_out, token_chunk)
+    token_chunks = _token_axis_length(hidden_padded) // token_chunk
 
-    grad_hidden = jnp.zeros_like(flat_hidden)
+    grad_hidden = jnp.zeros_like(hidden_padded)
     grad_gate = jnp.zeros_like(gate_kernel)
     grad_up = jnp.zeros_like(up_kernel)
     grad_down = jnp.zeros_like(down_kernel)
@@ -245,16 +288,8 @@ def make_tiled_gated_mlp(
     def body(i: Array, state: tuple[Array, Array, Array, Array]):
       gh_acc, gg_acc, gu_acc, gd_acc = state
       start = i * token_chunk
-      x = jax.lax.dynamic_slice(
-          flat_hidden,
-          (start, 0),
-          (token_chunk, hidden_dim),
-      )
-      go = jax.lax.dynamic_slice(
-          flat_grad_out,
-          (start, 0),
-          (token_chunk, down_kernel.shape[-1]),
-      )
+      x = _slice_token_tile(hidden_padded, start, token_chunk)
+      go = _slice_token_tile(grad_out_padded, start, token_chunk)
 
       _, gate, up, intermediate = _tile_forward(
           x,
@@ -263,8 +298,8 @@ def make_tiled_gated_mlp(
           down_kernel,
           activation,
       )
-      grad_intermediate = jnp.dot(go, down_kernel.T)
-      grad_down_tile = jnp.dot(intermediate.T, go)
+      grad_intermediate = _linear(go, down_kernel.T)
+      grad_down_tile = _kernel_grad(intermediate, go)
 
       grad_up_pre = grad_intermediate * _activation(gate, activation)
       grad_gate_pre = (
@@ -274,17 +309,13 @@ def make_tiled_gated_mlp(
       )
 
       grad_x = (
-          jnp.dot(grad_gate_pre, gate_kernel.T)
-          + jnp.dot(grad_up_pre, up_kernel.T)
+          _linear(grad_gate_pre, gate_kernel.T)
+          + _linear(grad_up_pre, up_kernel.T)
       )
-      grad_gate_tile = jnp.dot(x.T, grad_gate_pre)
-      grad_up_tile = jnp.dot(x.T, grad_up_pre)
+      grad_gate_tile = _kernel_grad(x, grad_gate_pre)
+      grad_up_tile = _kernel_grad(x, grad_up_pre)
 
-      gh_acc = jax.lax.dynamic_update_slice(
-          gh_acc,
-          grad_x.astype(gh_acc.dtype),
-          (start, 0),
-      )
+      gh_acc = _update_token_tile(gh_acc, grad_x.astype(gh_acc.dtype), start)
       return (
           gh_acc,
           gg_acc + grad_gate_tile.astype(gg_acc.dtype),
@@ -298,7 +329,7 @@ def make_tiled_gated_mlp(
         body,
         (grad_hidden, grad_gate, grad_up, grad_down),
     )
-    grad_hidden = grad_hidden[:n_tokens].reshape(original_shape)
+    grad_hidden = _trim_token_axis(grad_hidden, n_tokens).reshape(original_shape)
     return grad_hidden, grad_gate, grad_up, grad_down
 
   tiled_gated_mlp.defvjp(fwd, bwd)
@@ -334,19 +365,20 @@ def estimate_gated_mlp_intermediate_bytes(
   This is a simple reporting helper, not a replacement for XLA or TPU profiler
   memory reports.
   """
-  tokens = int(batch_size) * int(sequence_length)
-  if tokens <= 0:
+  batch_size = int(batch_size)
+  sequence_length = int(sequence_length)
+  if batch_size * sequence_length <= 0:
     raise ValueError("batch_size * sequence_length must be positive.")
   if intermediate_dim <= 0:
     raise ValueError("intermediate_dim must be positive.")
   if dtype_bytes <= 0:
     raise ValueError("dtype_bytes must be positive.")
-  dense = tokens * int(intermediate_dim) * int(dtype_bytes)
+  dense = batch_size * sequence_length * int(intermediate_dim) * int(dtype_bytes)
   if token_chunk is None:
-    tile_tokens = tokens
+    tile_sequence = sequence_length
   else:
-    tile_tokens = min(_validate_token_chunk(token_chunk), tokens)
-  tiled = tile_tokens * int(intermediate_dim) * int(dtype_bytes)
+    tile_sequence = min(_validate_token_chunk(token_chunk), sequence_length)
+  tiled = batch_size * tile_sequence * int(intermediate_dim) * int(dtype_bytes)
   return {
       "dense_intermediate_bytes": dense,
       "tiled_intermediate_bytes": tiled,
