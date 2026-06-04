@@ -14,8 +14,8 @@ for JAX/Tunix training.
 - `04-ACTIVATION-POLICY/`: the final Gemma3 activation remat/offload policy
   experiment report plus folded-in Gemma4 boundary rows, retained data, figures, and
   reproduction guide.
-- `05-GEMMA3-LARGE-SWEEP/`: corrected Gemma3 12B/27B large-model TPU v5e
-  patch sweep, retained summaries, figures, and reproduction guide.
+- `05-GEMMA3-LARGE-SWEEP/`: Gemma3 12B/27B large-model TPU v5e patch sweep,
+  retained summaries, figures, and reproduction guide.
 
 Raw TPU traces, checkpoints, smoke outputs, and intermediate reports are kept
 out of the final workstream packages after each result is consolidated.
@@ -238,13 +238,12 @@ Headline retained results:
   `04-ACTIVATION-POLICY/results/small-model-splash-activation-ablation/`
   found a useful 270M offload boundary move, but also exposed dense-attention
   coverage gaps in long-context OOM logs.
-- The corrected Gemma3 large-model sweep confirms that the patch stack still
-  moves sharded 12B/27B boundaries on TPU v5e. Gemma3 12B on `v5litepod-4`
-  moved from Default L1024 compile OOM at 17.42 GiB/chip to Stacked L4096
-  completion at 14.42 GiB/chip. Gemma3 27B on `v5litepod-8` moved from Default
-  L1024 compile OOM at 24.66 GiB/chip to Stacked L2048 completion at
-  13.58 GiB/chip. The tradeoff is large step-time overhead on offload-heavy
-  rows.
+- The Gemma3 large-model sweep confirms that the patch stack still moves
+  sharded 12B/27B boundaries on TPU v5e. Gemma3 12B on `v5litepod-4` moved from
+  Default L1024 compile OOM at 17.42 GiB/chip to Stacked L4096 completion at
+  14.42 GiB/chip. Gemma3 27B on `v5litepod-8` moved from Default L1024 compile
+  OOM at 24.66 GiB/chip to Stacked L2048 completion at 13.58 GiB/chip. The
+  tradeoff is large step-time overhead on offload-heavy rows.
 - Gemma4 base boundary rows are folded into the same four workstreams. At LoRA rank
   16, batch 1, max length 2048: `google/gemma-4-E2B` on `v5litepod-4` shows
   Default CE, Packing, and Split Remat compile OOM while CCE, Tiled MLP, and

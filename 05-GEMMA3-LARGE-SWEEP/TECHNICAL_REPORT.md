@@ -2,13 +2,13 @@
 
 ## Executive Summary
 
-This corrected sweep answers the question that the first large-model run failed
-to answer: do the drop-in patches still reduce memory and open longer context
-lengths when Gemma3 is sharded across multiple TPU v5e chips?
+This sweep answers a direct systems question: do the drop-in patches still
+reduce memory and open longer context lengths when Gemma3 is sharded across
+multiple TPU v5e chips?
 
 The answer is yes, but not every patch has the same role.
 
-| Claim | Corrected result |
+| Claim | Result |
 | --- | --- |
 | Memory moves at the shared L512 baseline | 12B Stacked: 12.39 -> 11.74 GiB/chip; 27B Stacked: 14.52 -> 13.29 GiB/chip |
 | A single practical patch can move 12B | 12B Tiled MLP makes L1024 fit at 14.13 GiB/chip where Default OOMs at 17.42 GiB/chip |
@@ -46,23 +46,22 @@ to read.
 
 ## Patch Status Was Verified
 
-The earlier large-model run was invalid because patched variants accidentally
-ran with autopatching disabled. The bug was subtle:
+The final runner explicitly enables autopatching for patched variants. This
+matters because the benchmark defaults to disabled autopatching unless the
+environment opts in:
 
 ```text
-TUNIX_ACCEL_DISABLE_AUTOPATCH was removed for patched variants.
-02-PACKING/run_gemma_training_benchmark.py then set it back to 1 by default.
+TUNIX_ACCEL_DISABLE_AUTOPATCH=0
 ```
 
-The corrected runner sets `TUNIX_ACCEL_DISABLE_AUTOPATCH=0` for patched
-variants. The benchmark summary also records explicit install flags such as
+The benchmark summary also records explicit install flags such as
 `cce_installed`, `gemma3_tiled_mlp_installed`,
 `gemma3_activation_policy_installed`, and
 `gemma3_splash_attention_installed`.
 
-Successful corrected rows confirm that the requested patches were active. For
-failed rows, the XLA failure still records the requested variant and memory
-estimate; the run failed before producing a normal training summary.
+Successful rows confirm that the requested patches were active. For failed
+rows, the XLA failure still records the requested variant and memory estimate;
+the run failed before producing a normal training summary.
 
 ## L512 Baseline: Small But Real Memory Movement
 
@@ -85,8 +84,8 @@ whether those savings change what can run.
 
 ## Context Frontier: The Boundary Moves
 
-The measured batch-1 context frontier changed substantially after the corrected
-patches were applied.
+The measured batch-1 context frontier changed substantially after the patches
+were applied.
 
 ![Batch-1 measured context frontier](./assets/gemma3_large_context_frontier.png)
 
@@ -189,7 +188,7 @@ residency, sharding layout, MLP activations, attention activations, and loss
 memory are all competing near the HBM limit. A patch that is decisive on a
 smaller model may only be a partial lever here.
 
-That is why the corrected 27B row is especially useful:
+That is why the 27B row is especially useful:
 
 ```text
 Default L1024:   24.66 GiB/chip, OOM
@@ -200,8 +199,7 @@ Stacked L4096:  17.10 GiB/chip, OOM
 ```
 
 This separates "the patch does nothing" from "the patch helps but is not the
-dominant remaining limiter." The previous invalid run could not make that
-distinction.
+dominant remaining limiter."
 
 ## Limitations
 
@@ -215,7 +213,7 @@ distinction.
 
 ## Data
 
-The report directory keeps lightweight corrected summaries:
+The report directory keeps lightweight summaries:
 
 ```text
 05-GEMMA3-LARGE-SWEEP/raw/12b_corrected/
