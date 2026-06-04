@@ -1,0 +1,6 @@
+area,check,count,result,notes
+Activation policy,Layer call parity,4,pass,"layer_remat, layer_offload, split_remat, split_offload"
+Activation policy,Per-layer input parity,2,pass,split_remat and split_offload with per_layer_input_dim=8
+Activation policy,KV shared cache parity,2,pass,split_remat and split_offload preserve kv_shared_cache path
+Activation policy,Model loss and gradient parity,4,pass,"layer_remat, layer_offload, split_remat, split_offload"
+Autopatch,Gemma4 import-time activation policy autopatch,1,pass,TUNIX_ACCEL_ACTIVATION_POLICY=split_remat installs Gemma4 activation policy

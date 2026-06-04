@@ -36,13 +36,16 @@ The small parity test produced dense CE loss 8.70297, CCE loss 8.70004, absolute
 
 The context sweep used synthetic SFT input. That is deliberate: this stage is not a language-quality benchmark. It isolates the memory pressure created by `batch * context * vocab` and asks whether the same model and TPU can compile and run when only the loss implementation changes.
 
-The memory metric below is not a live TPU profiler allocation sample. It is XLA buffer-assignment planned HBM. For multi-chip runs, aggregate HBM means:
+The memory metric below is not a live TPU profiler allocation sample. It is XLA
+buffer-assignment planned HBM. The figure uses max per-chip HBM, because the TPU
+fit decision is per chip. The retained CSV also includes aggregate accounting:
 
 ```text
 aggregate_xla_hbm_gib = max_per_chip_xla_peak_gib * allocated_chip_count
 ```
 
-It is a chip-count-normalized reporting value, not one contiguous memory pool.
+That aggregate value is useful for resource accounting, but it is not one
+contiguous memory pool and is not used as the visual axis.
 
 ![Context length turns the logits tensor into the memory wall.](assets/gemma3_270m_1b_context_memory.png)
 
@@ -72,21 +75,37 @@ The two headline rows are:
 - Gemma3 270M, batch 16: Default CE completed context 512; CCE completed context 4,096.
 - Gemma3 1B, batch 16: Default CE completed context 1,024; CCE completed context 4,096.
 
-## 3. Second Result: the b16/L2048 Pressure Point Generalizes Across Model Sizes
+## 3. Second Result: the Fixed-Shape Pressure Point Generalizes
 
-After the context sweep, we fixed batch size 16 and context length 2048 and compared Gemma3 model sizes. This is a harsher setting than the final EN-FR quality run, and it is useful because it exposes the OOM frontier directly.
+After the context sweep, we fixed a pressure point and compared model sizes. For
+Gemma3, the pressure point is LoRA batch 16, max length 2048. For Gemma4, the
+retained base-checkpoint check uses LoRA batch 1, max length 2048 because the
+larger base checkpoints already hit the compile boundary there. The Gemma4 rows
+are not translation-quality runs; they are systems boundary checks using the
+same OPUS100 EN-FR-shaped SFT input path with quality evaluation disabled.
 
-![The same b16/L2048 pressure point across Gemma3 model sizes.](assets/gemma3_b16_aggregate_hbm.png)
+![Cut Cross Entropy boundary outcomes across Gemma3 and Gemma4.](assets/gemma3_gemma4_cce_per_chip_hbm.png)
 
-*The same b16/L2048 pressure point across Gemma3 model sizes.*
+*CCE is the same loss-logits memory lever across the retained Gemma3 and Gemma4
+boundary rows. The pressure point is not identical across families, so each row
+labels its batch, length, and TPU slice.*
 
-The table below is the same story numerically. The 4B case is important because CCE still reduces planned HBM, but not enough to make this specific v5e-8 configuration succeed. That is a good guardrail: CCE helps, but it does not erase every other memory source in the model.
+The table below is the same story numerically. The figure uses max per-chip HBM
+pressure because that is the value that decides whether a TPU program fits. The
+aggregate accounting is still useful, but it is a secondary reporting value
+because the chip count changes across rows.
 
-| Model | Chips | Default aggregate HBM | CCE aggregate HBM | Reduction | Default status | CCE status |
+| Model | Chips | Default max/chip | CCE max/chip | Aggregate accounting | Default status | CCE status |
 | --- | --- | --- | --- | --- | --- | --- |
-| 270M | 1 | 17.0 GiB | 6.5 GiB | 62% lower | OOM | OK |
-| 1B | 4 | 62.1 GiB | 18.9 GiB | 70% lower | OOM | OK |
-| 4B | 8 | 186.8 GiB | 132.6 GiB | 29% lower | OOM | OOM |
+| Gemma3 270M, b16/L2048 | 1 | 17.0 GiB planned | 6.5 GiB planned | 17.0 -> 6.5 GiB | OOM | OK |
+| Gemma3 1B, b16/L2048 | 4 | 15.5 GiB planned | 4.7 GiB planned | 62.1 -> 18.9 GiB | OOM | OK |
+| Gemma3 4B, b16/L2048 | 8 | 23.3 GiB planned | 16.6 GiB planned | 186.8 -> 132.6 GiB | OOM | OOM |
+| Gemma4 E2B, b1/L2048 | 4 | 16.6 GB compile estimate | 5.2 GB runtime peak | 66.4 -> 20.66 GB | OOM | OK |
+| Gemma4 E4B, b1/L2048 | 8 | 19.8 GB compile estimate | 17.6 GB compile estimate | 158.5 -> 141.2 GB | OOM | OOM |
+
+The guardrail is now clearer than in the Gemma3-only plot: CCE can flip a
+loss-logits-driven boundary, but it does not erase every other memory source.
+Gemma3 4B and Gemma4 E4B both still need another lever after CCE.
 
 ## 4. Third Result: Real EN-FR Training Keeps Quality at the Same Batch Size
 
@@ -194,6 +213,8 @@ Below are examples from the final fixed evaluation. In many cases, Default CE b1
 - `01-CCE/data/gemma3_270m_1b_context_frontier.csv`
 - `01-CCE/data/gemma3_270m_1b_context_summary.csv`
 - `01-CCE/data/gemma3_b16_aggregate_hbm.csv`
+- `01-CCE/data/gemma4_base_cce_tpu_l2048_b1.csv`
+- `01-CCE/data/gemma4_base_tpu_l2048_b1_all_variants.csv`
 - `01-CCE/data/quality_training_summary.csv`
 - `01-CCE/data/quality_summary.csv`
 - `01-CCE/data/side_by_side.jsonl`

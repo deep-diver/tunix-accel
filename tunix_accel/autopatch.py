@@ -18,6 +18,7 @@ from types import ModuleType
 
 CCE_TARGET_MODULE = "tunix.sft.peft_trainer"
 GEMMA3_TARGET_MODULE = "tunix.models.gemma3.model"
+GEMMA4_TARGET_MODULE = "tunix.models.gemma4.model"
 ENV_DISABLE = "TUNIX_ACCEL_DISABLE_AUTOPATCH"
 ENV_DISABLE_CE = "TUNIX_ACCEL_DISABLE_CE"
 ENV_TOKEN_CHUNK = "TUNIX_ACCEL_CE_TOKEN_CHUNK"
@@ -153,6 +154,26 @@ def _patch_gemma3_tiled_mlp(module: ModuleType | None = None) -> None:
   setattr(target, "_tunix_accel_tiled_mlp_autopatched", True)
 
 
+def _patch_gemma4_tiled_mlp(module: ModuleType | None = None) -> None:
+  if not _env_enabled() or _env_bool(ENV_DISABLE_TILED_MLP, default=False):
+    return
+  target = module or sys.modules.get(GEMMA4_TARGET_MODULE)
+  if target is None or getattr(target, "_tunix_accel_tiled_mlp_autopatched", False):
+    return
+
+  from tunix_accel import gemma4_tiled_mlp  # pylint: disable=import-outside-toplevel
+
+  gemma4_tiled_mlp.install(
+      token_chunk=_tiled_mlp_token_chunk_from_env(),
+      fallback_to_original_on_lora=_env_bool(
+          ENV_TILED_MLP_FALLBACK_ON_LORA,
+          default=True,
+      ),
+      lora_alpha=_tiled_mlp_lora_alpha_from_env(),
+  )
+  setattr(target, "_tunix_accel_tiled_mlp_autopatched", True)
+
+
 def _patch_gemma3_activation_policy(module: ModuleType | None = None) -> None:
   if (
       not _env_enabled()
@@ -173,6 +194,40 @@ def _patch_gemma3_activation_policy(module: ModuleType | None = None) -> None:
   from tunix_accel import gemma3_activation_policy  # pylint: disable=import-outside-toplevel
 
   gemma3_activation_policy.install(
+      policy=policy,
+      prevent_cse=_env_bool(ENV_ACTIVATION_PREVENT_CSE, default=True),
+      offload_src=os.environ.get(
+          ENV_ACTIVATION_OFFLOAD_SRC,
+          DEFAULT_ACTIVATION_OFFLOAD_SRC,
+      ),
+      offload_dst=os.environ.get(
+          ENV_ACTIVATION_OFFLOAD_DST,
+          DEFAULT_ACTIVATION_OFFLOAD_DST,
+      ),
+  )
+  setattr(target, "_tunix_accel_activation_policy_autopatched", True)
+
+
+def _patch_gemma4_activation_policy(module: ModuleType | None = None) -> None:
+  if (
+      not _env_enabled()
+      or _env_bool(ENV_DISABLE_ACTIVATION_POLICY, default=False)
+  ):
+    return
+  policy = _activation_policy_from_env()
+  if policy == "none":
+    return
+  target = module or sys.modules.get(GEMMA4_TARGET_MODULE)
+  if target is None or getattr(
+      target,
+      "_tunix_accel_activation_policy_autopatched",
+      False,
+  ):
+    return
+
+  from tunix_accel import gemma4_activation_policy  # pylint: disable=import-outside-toplevel
+
+  gemma4_activation_policy.install(
       policy=policy,
       prevent_cse=_env_bool(ENV_ACTIVATION_PREVENT_CSE, default=True),
       offload_src=os.environ.get(
@@ -215,9 +270,15 @@ def _patch_gemma3(module: ModuleType | None = None) -> None:
   _patch_gemma3_activation_policy(module)
 
 
+def _patch_gemma4(module: ModuleType | None = None) -> None:
+  _patch_gemma4_tiled_mlp(module)
+  _patch_gemma4_activation_policy(module)
+
+
 _PATCHERS = {
     CCE_TARGET_MODULE: _patch_cce,
     GEMMA3_TARGET_MODULE: _patch_gemma3,
+    GEMMA4_TARGET_MODULE: _patch_gemma4,
 }
 
 

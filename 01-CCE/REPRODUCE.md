@@ -14,6 +14,8 @@ The final retained artifacts are:
   - `01-CCE/data/gemma3_270m_1b_context_frontier.csv`
   - `01-CCE/data/gemma3_270m_1b_context_summary.csv`
   - `01-CCE/data/gemma3_b16_aggregate_hbm.csv`
+  - `01-CCE/data/gemma4_base_cce_tpu_l2048_b1.csv`
+  - `01-CCE/data/gemma4_base_tpu_l2048_b1_all_variants.csv`
   - `01-CCE/data/quality_training_summary.csv`
   - `01-CCE/data/quality_summary.csv`
   - `01-CCE/data/side_by_side.jsonl`
@@ -86,6 +88,8 @@ Recommended TPU shapes:
 | Context sweep 270M | `google/gemma-3-270m-it` | `v5litepod-1` | 1 |
 | Context sweep 1B | `google/gemma-3-1b-it` | `v5litepod-4` | 4 |
 | b16/L2048 4B pressure point | `google/gemma-3-4b-it` | `v5litepod-8` | 8 |
+| Gemma4 E2B boundary row | `google/gemma-4-E2B` | `v5litepod-4` | 4 |
+| Gemma4 E4B boundary row | `google/gemma-4-E4B` | `v5litepod-8` | 8 |
 | EN-FR quality run | `google/gemma-3-270m-it` | `v5litepod-1` | 1 |
 
 Create a TPU VM:
@@ -191,7 +195,53 @@ The final retained table is:
 01-CCE/data/gemma3_b16_aggregate_hbm.csv
 ```
 
-## 6. Reproduce the Real EN-FR Quality Run
+## 6. Reproduce the Gemma4 Base Boundary Rows
+
+Purpose: check whether the existing CCE drop-in changes the Gemma4 base
+compile boundary. This is not a quality or generation benchmark.
+
+Common settings:
+
+| Field | Value |
+| --- | --- |
+| Dataset shape | OPUS100 EN-FR wrapper |
+| Batch | 1 |
+| Max length | 2048 |
+| LoRA rank | 16 |
+| Steps | 3 for boundary, 4 for successful timed rows |
+| Quality eval | disabled |
+
+For E2B on `v5litepod-4` and E4B on `v5litepod-8`, run:
+
+```bash
+python tools/run_gemma4_base_benchmark.py \
+  --model-size e2b \
+  --variant default \
+  --batch-size 1 \
+  --max-length 2048 \
+  --max-steps 3 \
+  --num-examples 128 \
+  --lora-rank 16 \
+  --outdir /tmp/gemma4-cce-boundary
+
+python tools/run_gemma4_base_benchmark.py \
+  --model-size e2b \
+  --variant cce \
+  --batch-size 1 \
+  --max-length 2048 \
+  --max-steps 4 \
+  --num-examples 128 \
+  --lora-rank 16 \
+  --outdir /tmp/gemma4-cce-boundary
+```
+
+Repeat with `--model-size e4b`. The retained table is:
+
+```text
+01-CCE/data/gemma4_base_cce_tpu_l2048_b1.csv
+```
+
+## 7. Reproduce the Real EN-FR Quality Run
 
 Purpose: verify that the CCE training path preserves real training behavior.
 
@@ -230,7 +280,7 @@ Retained outputs:
 01-CCE/data/side_by_side.jsonl
 ```
 
-## 7. Verification Checklist
+## 8. Verification Checklist
 
 After rerunning, the expected qualitative result is:
 

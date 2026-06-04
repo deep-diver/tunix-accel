@@ -12,6 +12,7 @@ import argparse
 import csv
 from dataclasses import dataclass
 import importlib.metadata as importlib_metadata
+import inspect
 import json
 import math
 import os
@@ -96,6 +97,28 @@ def translation_pair(row: dict[str, Any]) -> tuple[str, str]:
   return translation["en"], translation["fr"]
 
 
+def configure_autopatch(*, allow_autopatch: bool) -> None:
+  disabled = os.environ.get("TUNIX_ACCEL_DISABLE_AUTOPATCH", "").lower() in {
+      "1",
+      "true",
+      "yes",
+      "on",
+  }
+  if allow_autopatch:
+    if not disabled:
+      from tunix_accel import autopatch  # pylint: disable=import-outside-toplevel
+
+      autopatch.enable()
+    return
+
+  if not disabled:
+    raise RuntimeError(
+        "This benchmark should run with repository autopatches disabled. Launch "
+        "with TUNIX_ACCEL_DISABLE_AUTOPATCH=1, or pass --allow-autopatch for "
+        "explicit patch-comparison runs."
+    )
+
+
 def load_tokenizer(args: argparse.Namespace) -> TokenizerBundle:
   if args.tokenizer_source == "sentencepiece":
     from tunix.models.gemma3 import params as gemma3_params  # pylint: disable=import-outside-toplevel
@@ -119,9 +142,13 @@ def load_tokenizer(args: argparse.Namespace) -> TokenizerBundle:
   if args.tokenizer_source == "huggingface":
     from transformers import AutoTokenizer  # pylint: disable=import-outside-toplevel
 
+    tokenizer_kwargs: dict[str, Any] = {}
+    if "gemma-4" in args.model_id.lower():
+      tokenizer_kwargs["extra_special_tokens"] = {}
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_id,
         local_files_only=not args.allow_download,
+        **tokenizer_kwargs,
     )
     pad_id = tokenizer.pad_token_id
     if pad_id is None:
@@ -444,6 +471,16 @@ def cycled_batches(
     yield prepared.batches[step % len(prepared.batches)]
 
 
+def timed_batches(
+    batches: Iterator[dict[str, np.ndarray]],
+    timings: list[float],
+) -> Iterator[dict[str, np.ndarray]]:
+  for batch in batches:
+    start = time.perf_counter()
+    yield batch
+    timings.append(time.perf_counter() - start)
+
+
 def cycled_batch_metrics(
     prepared: PreparedVariant,
     *,
@@ -469,11 +506,50 @@ def create_mesh(jax, args: argparse.Namespace):
   return jax.sharding.Mesh(devices.reshape((fsdp, tp)), ("fsdp", "tp"))
 
 
-def create_model(mesh, args: argparse.Namespace):
+def apply_lora_if_requested(model, mesh, args: argparse.Namespace):
   from flax import nnx  # pylint: disable=import-outside-toplevel
+  import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
   import qwix  # pylint: disable=import-outside-toplevel
-  from tunix.cli.utils import model as model_lib  # pylint: disable=import-outside-toplevel
+  from tunix.sft import utils as sft_utils  # pylint: disable=import-outside-toplevel
   from tunix.rl import reshard  # pylint: disable=import-outside-toplevel
+
+  if args.lora_rank <= 0:
+    return model
+
+  lora_provider = qwix.LoraProvider(
+      module_path=args.lora_module_path,
+      rank=args.lora_rank,
+      alpha=args.lora_alpha,
+  )
+  if hasattr(model, "get_model_input"):
+    model = qwix.apply_lora_to_model(
+        model,
+        lora_provider,
+        **model.get_model_input(),
+        rngs=nnx.Rngs(args.seed),
+    )
+  else:
+    sample_len = min(max(args.max_length, 1), 8)
+    sample_tokens = jnp.ones((1, sample_len), dtype=jnp.int32)
+    sample_valid = jnp.ones_like(sample_tokens, dtype=bool)
+    sample_positions = sft_utils.build_positions_from_mask(sample_valid)
+    sample_attention_mask = sft_utils.make_causal_attn_mask(sample_valid)
+    model = qwix.apply_lora_to_model(
+        model,
+        lora_provider,
+        sample_tokens,
+        sample_positions,
+        None,
+        sample_attention_mask,
+        rngs=nnx.Rngs(args.seed),
+    )
+  if mesh is not None:
+    model = reshard.reshard_model_to_mesh(model, mesh)
+  return model
+
+
+def create_model(mesh, args: argparse.Namespace):
+  from tunix.cli.utils import model as model_lib  # pylint: disable=import-outside-toplevel
 
   model_config = {
       "model_name": infer_model_name(args.model_id),
@@ -492,21 +568,7 @@ def create_model(mesh, args: argparse.Namespace):
       "add_eos": False,
   }
   model, _ = model_lib.create_model(model_config, tokenizer_config, mesh)
-  if args.lora_rank > 0:
-    lora_provider = qwix.LoraProvider(
-        module_path=args.lora_module_path,
-        rank=args.lora_rank,
-        alpha=args.lora_alpha,
-    )
-    model = qwix.apply_lora_to_model(
-        model,
-        lora_provider,
-        **model.get_model_input(),
-        rngs=nnx.Rngs(args.seed),
-    )
-    if mesh is not None:
-      model = reshard.reshard_model_to_mesh(model, mesh)
-  return model
+  return apply_lora_if_requested(model, mesh, args)
 
 
 def create_trainer(model, args: argparse.Namespace, run_dir: Path):
@@ -520,14 +582,18 @@ def create_trainer(model, args: argparse.Namespace, run_dir: Path):
       b2=args.adam_b2,
       weight_decay=args.weight_decay,
   )
+  metrics_options_kwargs: dict[str, Any] = {
+      "log_dir": str(run_dir / "tensorboard"),
+      "project_name": "tunix-accel",
+      "run_name": run_dir.name,
+      "flush_every_n_steps": max(args.log_every, 1),
+  }
+  if "backend_factories" in inspect.signature(
+      metrics_logger_lib.MetricsLoggerOptions
+  ).parameters:
+    metrics_options_kwargs["backend_factories"] = []
   logger = metrics_logger_lib.MetricsLogger(
-      metrics_logger_lib.MetricsLoggerOptions(
-          log_dir=str(run_dir / "tensorboard"),
-          project_name="tunix-accel",
-          run_name=run_dir.name,
-          flush_every_n_steps=max(args.log_every, 1),
-          backend_factories=[],
-      )
+      metrics_logger_lib.MetricsLoggerOptions(**metrics_options_kwargs)
   )
   config = peft_trainer.TrainingConfig(
       eval_every_n_steps=max(args.max_steps + 1, 1),
@@ -770,12 +836,16 @@ def run_variant(
     model = create_model(mesh, args)
     trainer, logger = create_trainer(model, args, run_dir)
     trainer.is_managed_externally = True
+    local_step_times: list[float] = []
     try:
       trainer = trainer.with_gen_model_input_fn(
           create_gen_model_input_fn(dataset.pad_token_id)
       )
       memory_before_train = device_memory_snapshot(jax)
-      train_iter = cycled_batches(prepared, max_steps=args.max_steps)
+      train_iter = timed_batches(
+          cycled_batches(prepared, max_steps=args.max_steps),
+          local_step_times,
+      )
       trainer.train(train_iter, eval_ds=None, skip_jit=args.skip_jit)
       memory_after_train = device_memory_snapshot(jax)
       quality: dict[str, Any] = {}
@@ -849,6 +919,11 @@ def run_variant(
 
   losses = metric_history(logger, "loss")
   step_times = metric_history(logger, "step_time_sec")
+  if (
+      len(step_times) < len(losses)
+      or all(math.isnan(value) for value in step_times[: len(losses)])
+  ):
+    step_times = local_step_times
   grad_norms = metric_history(logger, "grad_norm")
   steps_recorded = len(losses)
   token_metrics = cycled_batch_metrics(prepared, steps=steps_recorded)
@@ -1189,19 +1264,14 @@ def main() -> None:
   parser.add_argument("--log-every", type=int, default=1)
   parser.add_argument("--seed", type=int, default=0)
   parser.add_argument("--outdir", default="02-PACKING/results/gemma-training-default-ce")
+  parser.add_argument(
+      "--allow-autopatch",
+      action="store_true",
+      help="Allow repository autopatches for explicit patch-comparison runs.",
+  )
   args = parser.parse_args()
 
-  if os.environ.get("TUNIX_ACCEL_DISABLE_AUTOPATCH") not in {
-      "1",
-      "true",
-      "yes",
-      "on",
-  }:
-    raise RuntimeError(
-        "This benchmark should run with repository autopatches disabled. Launch "
-        "with "
-        "TUNIX_ACCEL_DISABLE_AUTOPATCH=1."
-    )
+  configure_autopatch(allow_autopatch=args.allow_autopatch)
 
   outdir = Path(args.outdir).expanduser().resolve()
   outdir.mkdir(parents=True, exist_ok=True)

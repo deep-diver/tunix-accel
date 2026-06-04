@@ -1,4 +1,4 @@
-# Reproducing the Gemma3 Activation Policy Experiments
+# Reproducing the Activation Policy Experiments
 
 This guide records how to reproduce the retained activation remat/offload
 experiment family.
@@ -18,6 +18,8 @@ The retained artifacts are:
   - `04-ACTIVATION-POLICY/data/gemma3_4b_activation_policy_keypoints.csv`
   - `04-ACTIVATION-POLICY/data/gemma3_4b_activation_policy_parity.json`
   - `04-ACTIVATION-POLICY/data/gemma3_small_model_activation_followup.csv`
+  - `04-ACTIVATION-POLICY/data/gemma4_base_activation_policy_tpu_l2048_b1.csv`
+  - `04-ACTIVATION-POLICY/data/gemma4_local_parity_summary.csv`
   - `04-ACTIVATION-POLICY/data/MANIFEST.json`
 - Raw final records: `04-ACTIVATION-POLICY/data/raw/`
 - Small-model raw follow-up:
@@ -31,6 +33,7 @@ streams, and duplicate tarballs.
 The patch code is kept at the repository root:
 
 - `tunix_accel/gemma3_activation_policy.py`
+- `tunix_accel/gemma4_activation_policy.py`
 - `tunix_accel/autopatch.py`
 - `sitecustomize.py`
 
@@ -64,7 +67,10 @@ activation policy from the other package patches.
 Run:
 
 ```bash
-python -m pytest -q tests/test_gemma3_activation_policy.py tests/test_autopatch.py
+python -m pytest -q \
+  tests/test_gemma3_activation_policy.py \
+  tests/test_gemma4_activation_policy.py \
+  tests/test_autopatch.py
 ```
 
 The broader local smoke used before committing the branch was:
@@ -72,6 +78,7 @@ The broader local smoke used before committing the branch was:
 ```bash
 python -m pytest -q \
   tests/test_gemma3_activation_policy.py \
+  tests/test_gemma4_activation_policy.py \
   tests/test_autopatch.py \
   tests/test_gemma3_tiled_mlp.py
 ```
@@ -87,6 +94,8 @@ The retained TPU experiments used Cloud TPU v5e in `us-west4-a`.
 | 4B Splash + offload ablation | `google/gemma-3-4b-it` | `v5litepod-16` | 16 |
 | 270M small-model follow-up | `google/gemma-3-270m-it` | `v5litepod-1` | 1 |
 | 1B small-model follow-up | `google/gemma-3-1b-it` | `v5litepod-4` | 4 |
+| Gemma4 E2B boundary row | `google/gemma-4-E2B` | `v5litepod-4` | 4 |
+| Gemma4 E4B boundary row | `google/gemma-4-E4B` | `v5litepod-8` | 8 |
 
 Create a TPU VM:
 
@@ -323,7 +332,64 @@ Final retained copy:
 04-ACTIVATION-POLICY/assets/gemma3_small_model_activation_followup.png
 ```
 
-## 9. Regenerate Summary Figures
+## 9. Reproduce the Gemma4 Base Boundary Rows
+
+Purpose: check whether the Gemma4 activation-policy adapter moves a fixed-shape
+compile boundary. This is not a quality or generation benchmark.
+
+Common settings:
+
+| Field | Value |
+| --- | --- |
+| Dataset shape | OPUS100 EN-FR wrapper |
+| Batch | 1 |
+| Max length | 2048 |
+| LoRA rank | 16 |
+| Steps | 3 for boundary, 4 for successful timed rows |
+| Quality eval | disabled |
+
+Run `none`, `split_offload`, and the diagnostic `split_remat` rows on E2B
+`v5litepod-4`, then repeat on E4B `v5litepod-8`:
+
+```bash
+python tools/run_gemma4_base_benchmark.py \
+  --model-size e2b \
+  --variant default \
+  --batch-size 1 \
+  --max-length 2048 \
+  --max-steps 3 \
+  --num-examples 128 \
+  --lora-rank 16 \
+  --outdir /tmp/gemma4-activation-boundary
+
+python tools/run_gemma4_base_benchmark.py \
+  --model-size e2b \
+  --variant split_offload \
+  --batch-size 1 \
+  --max-length 2048 \
+  --max-steps 4 \
+  --num-examples 128 \
+  --lora-rank 16 \
+  --outdir /tmp/gemma4-activation-boundary
+
+python tools/run_gemma4_base_benchmark.py \
+  --model-size e2b \
+  --variant split_remat \
+  --batch-size 1 \
+  --max-length 2048 \
+  --max-steps 3 \
+  --num-examples 128 \
+  --lora-rank 16 \
+  --outdir /tmp/gemma4-activation-boundary
+```
+
+The retained table is:
+
+```text
+04-ACTIVATION-POLICY/data/gemma4_base_activation_policy_tpu_l2048_b1.csv
+```
+
+## 10. Regenerate Summary Figures
 
 After copying the 4B raw retained files into `04-ACTIVATION-POLICY/data/raw/`,
 run:

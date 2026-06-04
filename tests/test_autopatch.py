@@ -95,3 +95,36 @@ def test_gemma3_activation_policy_autopatch_reads_policy_env() -> None:
       },
   )
   assert output.endswith("gemma3_activation_policy_autopatch=ok")
+
+
+def test_gemma4_tiled_mlp_autopatch_installs_on_import() -> None:
+  output = _run_python(
+      """
+      from tunix.models.gemma4 import model as gemma4_model
+      from tunix_accel import gemma4_tiled_mlp
+
+      assert gemma4_tiled_mlp.is_installed()
+      assert getattr(gemma4_model, "_tunix_accel_tiled_mlp_autopatched", False)
+      print("gemma4_tiled_mlp_autopatch=ok")
+      """
+  )
+  assert output.endswith("gemma4_tiled_mlp_autopatch=ok")
+
+
+def test_gemma4_activation_policy_autopatch_reads_policy_env() -> None:
+  output = _run_python(
+      """
+      from tunix.models.gemma4 import model as gemma4_model
+      from tunix_accel import gemma4_activation_policy
+
+      assert gemma4_activation_policy.is_installed()
+      assert getattr(gemma4_model, "_tunix_accel_activation_policy_autopatched", False)
+      assert gemma4_activation_policy._STATE.policy == "split_remat"
+      print("gemma4_activation_policy_autopatch=ok")
+      """,
+      env={
+          "TUNIX_ACCEL_DISABLE_TILED_MLP": "1",
+          "TUNIX_ACCEL_ACTIVATION_POLICY": "split_remat",
+      },
+  )
+  assert output.endswith("gemma4_activation_policy_autopatch=ok")

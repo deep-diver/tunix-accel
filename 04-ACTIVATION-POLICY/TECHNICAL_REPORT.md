@@ -1,9 +1,10 @@
-# JAX/Tunix + TPU Gemma3 Activation Policy Technical Report
+# JAX/Tunix + TPU Activation Policy Technical Report
 
-This report consolidates the Gemma3 activation remat/offload workstream on
-JAX/Tunix + Cloud TPU. The core question is narrow: with Tunix training code
-otherwise unchanged, can a drop-in activation policy reduce HBM residency enough
-to move a real long-context training boundary without changing model math?
+This report consolidates the activation remat/offload workstream on JAX/Tunix +
+Cloud TPU. The primary result is Gemma3 4B; Gemma4 base boundary rows are folded
+into the same headroom readout. The core question is narrow: with Tunix training
+code otherwise unchanged, can a drop-in activation policy reduce HBM residency
+enough to move a real training boundary without changing model math?
 
 ## Executive Summary
 
@@ -13,10 +14,10 @@ collapsed into one comparison.
 First, on the plain Default CE path, Gemma3 4B LoRA at L4096 moved from
 compile-time HBM OOM to completion when `split_offload` was enabled:
 
-| Setup | Activation policy | Status | XLA planned HBM |
+| Setup | Activation policy | Status | XLA planned HBM max/chip |
 | --- | --- | --- | ---: |
-| Gemma3 4B, Default CE, L4096, v5litepod-8 | none | compile OOM | 177.3 GiB aggregate |
-| Gemma3 4B, Default CE, L4096, v5litepod-8 | split_offload | OK | 115.2 GiB aggregate |
+| Gemma3 4B, Default CE, L4096, v5litepod-8 | none | compile OOM | 22.16 GiB/chip |
+| Gemma3 4B, Default CE, L4096, v5litepod-8 | split_offload | OK | 14.40 GiB/chip |
 
 Second, after CCE, Tiled MLP, and Splash Attention were already enabled, we ran
 a long-context ablation that changed only activation policy. In that fixed
@@ -65,11 +66,12 @@ the main before/after plot.
 The implementation lives in:
 
 - `tunix_accel/gemma3_activation_policy.py`
+- `tunix_accel/gemma4_activation_policy.py`
 - `tunix_accel/autopatch.py`
 - `sitecustomize.py`
 
 The package keeps the default activation policy as `none`. Installed
-environments only patch Tunix Gemma3 when the user asks for it:
+environments only patch Tunix Gemma3 or Gemma4 when the user asks for it:
 
 ```bash
 export TUNIX_ACCEL_ACTIVATION_POLICY=split_offload
@@ -87,10 +89,10 @@ and Splash Attention **on for both arms**; it is not a CCE ablation.
 The keypoint runs used Gemma3 4B IT, LoRA rank 16, batch 1, Default CE, Cloud
 TPU v5litepod-8, 8 chips, `fsdp=8,tp=1`, and 5 train steps.
 
-The main figure is expressed as HBM headroom:
+The main figure is expressed as per-chip HBM headroom:
 
 ```text
-headroom_gib = v5litepod_8_hbm_limit_gib - aggregate_xla_hbm_gib
+headroom_gib_per_chip = hbm_limit_gib_per_chip - max_per_chip_hbm_gib
 ```
 
 Positive values fit below the TPU limit. Negative values are compile-OOM. This
@@ -98,14 +100,14 @@ view is intentionally used instead of a raw-memory bar chart because it answers
 the important question directly: did the activation policy merely save some
 memory, or did it cross the fit boundary?
 
-The underlying memory metric is still the same for every row:
+For fixed-chip Gemma3 4B rows, aggregate accounting is still:
 
 ```text
 aggregate_xla_hbm_gib = max_per_chip_xla_planned_hbm_gib * 8 chips
 ```
 
-OOM is still decided per chip; the aggregate number is used only to make the
-8-chip comparison visually consistent.
+but the figure avoids raw aggregate memory as the visual axis because the
+Gemma4 rows use different TPU slice sizes.
 
 For consistency, every row uses the XLA buffer-assignment
 `*jit__train_step*memory-usage-report.txt` `Memory Space: default` `Total bytes`
@@ -114,12 +116,17 @@ different XLA diagnostic and is not mixed into the table below.
 
 ![Gemma3 4B activation offload HBM headroom.](./assets/gemma3_4b_activation_hbm_headroom.png)
 
-| Context | Activation policy | Status | XLA planned HBM aggregate | Runtime peak aggregate | Steady step |
-| ---: | --- | --- | ---: | ---: | ---: |
-| 2048 | none | OK | 82.9 GiB | 19.87 GiB | 0.233s |
-| 2048 | split offload | OK | 75.0 GiB | 17.22 GiB | 0.338s |
-| 4096 | none | OOM | 177.3 GiB |  |  |
-| 4096 | split offload | OK | 115.2 GiB | 18.83 GiB | 0.793s |
+The same before/after boundary question was then checked on Gemma4 E2B and E4B
+base checkpoints at LoRA rank 16, batch 1, max length 2048, with quality
+evaluation disabled. Those rows are systems boundary checks, not
+translation-quality runs. They are folded into the same headroom figure above.
+
+| Context | Activation policy | Status | Max/chip planned HBM | Per-chip headroom | Runtime peak aggregate | Steady step |
+| ---: | --- | --- | ---: | ---: | ---: | ---: |
+| 2048 | none | OK | 10.36 GiB | +5.39 GiB | 19.87 GiB | 0.233s |
+| 2048 | split offload | OK | 9.38 GiB | +6.37 GiB | 17.22 GiB | 0.338s |
+| 4096 | none | OOM | 22.16 GiB | -6.41 GiB |  |  |
+| 4096 | split offload | OK | 14.40 GiB | +1.35 GiB | 18.83 GiB | 0.793s |
 
 The clean interpretation:
 
@@ -138,6 +145,11 @@ The equivalent raw-memory view is retained as supporting evidence:
 
 ![Gemma3 4B activation offload before/after memory.](./assets/gemma3_4b_activation_before_after_memory.png)
 
+Gemma4 lines up with the Gemma3 interpretation: offload moved the fit boundary.
+The retained Gemma4 split-remat diagnostic still OOMed, so the result remains
+about activation **offload**, not remat alone. The cost is also visible:
+`split_offload` is a capacity feature, not a speed feature.
+
 ## 4. L4096 Boundary Close-Up
 
 ![Gemma3 4B L4096 activation policy frontier.](./assets/gemma3_4b_l4096_activation_frontier.png)
@@ -150,10 +162,10 @@ tradeoff check.
 
 ![Gemma3 4B L2048 activation tradeoff.](./assets/gemma3_4b_l2048_activation_tradeoff.png)
 
-| Activation policy | XLA planned HBM aggregate | Runtime peak aggregate | Steady step |
+| Activation policy | XLA planned HBM max/chip | Runtime peak aggregate | Steady step |
 | --- | ---: | ---: | ---: |
-| none | 82.9 GiB | 19.87 GiB | 0.233s |
-| split offload | 75.0 GiB | 17.22 GiB | 0.338s |
+| none | 10.36 GiB/chip | 19.87 GiB | 0.233s |
+| split offload | 9.38 GiB/chip | 17.22 GiB | 0.338s |
 
 The steady step is the median of steps 3-5. The usual
 `mean_step_time_sec_excl_first` metric is misleading in this tiny smoke because
@@ -324,9 +336,10 @@ the model function, and a same-model forward/gradient comparison is the cleaner
 test for mathematical behavior. A longer training run would mainly measure
 systems overhead and checkpoint behavior.
 
-The scope is Gemma3-only. Extending this to other model families should be done
-with explicit adapters because decoder-layer call structure, residual naming,
-attention layouts, and remat boundaries differ across families.
+The supported scope is Gemma3 and Gemma4 through explicit adapters. Extending
+this to other model families should follow the same pattern because
+decoder-layer call structure, residual naming, attention layouts, and remat
+boundaries differ across families.
 
 Finally, offload is not free. On this TPU shape, it bought memory headroom with
 slower steps and longer compile/dispatch behavior. The right default is still

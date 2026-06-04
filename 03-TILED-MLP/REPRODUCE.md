@@ -1,4 +1,4 @@
-# Reproducing the Gemma3 Tiled MLP Experiments
+# Reproducing the Tiled MLP Experiments
 
 This guide records how to reproduce the final Tiled MLP experiment family after
 removing intermediate result folders and checkpoints.
@@ -19,6 +19,8 @@ The final retained artifacts are:
   - `03-TILED-MLP/data/gemma3_4b_direct_parity.json`
   - `03-TILED-MLP/data/gemma3_4b_cce_composition_summary.csv`
   - `03-TILED-MLP/data/gemma3_4b_translation_samples.md`
+  - `03-TILED-MLP/data/gemma4_base_tiled_mlp_tpu_l2048_b1.csv`
+  - `03-TILED-MLP/data/gemma4_local_parity_summary.csv`
 - Raw final records: `03-TILED-MLP/data/raw/`
 
 Removed artifacts include old plot attempts, exploratory smoke folders, TPU log
@@ -30,6 +32,7 @@ The patch code is kept at the repository root:
 
 - `tunix_accel/tiled_mlp.py`
 - `tunix_accel/gemma3_tiled_mlp.py`
+- `tunix_accel/gemma4_tiled_mlp.py`
 - `tunix_accel/autopatch.py`
 - `sitecustomize.py`
 
@@ -62,11 +65,14 @@ Use `TUNIX_ACCEL_DISABLE_TILED_MLP=1` for the Default MLP baseline. Use
 Run:
 
 ```bash
-python -m pytest -q tests/test_tiled_mlp.py tests/test_gemma3_tiled_mlp.py
+python -m pytest -q \
+  tests/test_tiled_mlp.py \
+  tests/test_gemma3_tiled_mlp.py \
+  tests/test_gemma4_tiled_mlp.py
 ```
 
 These tests cover dense-vs-tiled forward parity, gradient parity, JIT parity,
-Gemma3 `FeedForward.block` integration, Gemma3 remat call-path parity, Tunix SFT
+Gemma3/Gemma4 `FeedForward.block` integration, remat call-path parity, Tunix SFT
 loss smoke, and Qwix-LoRA projection handling.
 
 ## 4. TPU Setup
@@ -80,6 +86,8 @@ Recommended shape:
 | 4B context keypoints | `google/gemma-3-4b-it` | `v5litepod-8` | 8 |
 | 4B 500-step validation | `google/gemma-3-4b-it` | `v5litepod-8` | 8 |
 | 4B same-model parity | `google/gemma-3-4b-it` | `v5litepod-8` | 8 |
+| Gemma4 E2B boundary row | `google/gemma-4-E2B` | `v5litepod-4` | 4 |
+| Gemma4 E4B boundary row | `google/gemma-4-E4B` | `v5litepod-8` | 8 |
 
 Create a TPU VM:
 
@@ -201,7 +209,54 @@ Final copy:
 03-TILED-MLP/data/gemma3_4b_context_keypoints.csv
 ```
 
-## 7. Reproduce the 500-Step Validation Smoke
+## 7. Reproduce the Gemma4 Base Boundary Rows
+
+Purpose: check whether the Gemma4 Tiled MLP adapter moves the same fixed-shape
+compile boundary. This is not a quality or generation benchmark.
+
+Common settings:
+
+| Field | Value |
+| --- | --- |
+| Dataset shape | OPUS100 EN-FR wrapper |
+| Batch | 1 |
+| Max length | 2048 |
+| LoRA rank | 16 |
+| Steps | 3 for boundary, 4 for successful timed rows |
+| Quality eval | disabled |
+
+Run default and tiled rows on E2B `v5litepod-4`, then repeat on E4B
+`v5litepod-8`:
+
+```bash
+python tools/run_gemma4_base_benchmark.py \
+  --model-size e2b \
+  --variant default \
+  --batch-size 1 \
+  --max-length 2048 \
+  --max-steps 3 \
+  --num-examples 128 \
+  --lora-rank 16 \
+  --outdir /tmp/gemma4-tiled-mlp-boundary
+
+python tools/run_gemma4_base_benchmark.py \
+  --model-size e2b \
+  --variant tiled_mlp \
+  --batch-size 1 \
+  --max-length 2048 \
+  --max-steps 4 \
+  --num-examples 128 \
+  --lora-rank 16 \
+  --outdir /tmp/gemma4-tiled-mlp-boundary
+```
+
+The retained table is:
+
+```text
+03-TILED-MLP/data/gemma4_base_tiled_mlp_tpu_l2048_b1.csv
+```
+
+## 8. Reproduce the 500-Step Validation Smoke
 
 Purpose: check that the memory-saving path trains and evaluates in the same
 rough loss band. This is not a completed translation-quality benchmark.
@@ -265,7 +320,7 @@ Final compact copies:
 03-TILED-MLP/data/raw/
 ```
 
-## 8. Reproduce the Composition Smoke
+## 9. Reproduce the Composition Smoke
 
 Purpose: verify that Tiled MLP can coexist with CCE in the same installed
 package.

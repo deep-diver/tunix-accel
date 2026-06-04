@@ -1,4 +1,4 @@
-google-tunix==0.1.6
+google-tunix @ git+https://github.com/google/tunix.git@43cb3bdf019d048bf3c9f3926555152ec536f8a9
 qwix==0.1.6
 kagglehub==0.4.3
 importlib_resources

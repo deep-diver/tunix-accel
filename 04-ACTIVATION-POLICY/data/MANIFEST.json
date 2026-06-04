@@ -15,6 +15,12 @@
     "assets/gemma3_small_model_activation_followup.png"
   ],
   "parity": "data/gemma3_4b_activation_policy_parity.json",
+  "gemma4_base_boundary_rows": {
+    "summary": "data/gemma4_base_activation_policy_tpu_l2048_b1.csv",
+    "parity": "data/gemma4_local_parity_summary.csv",
+    "figure": "assets/gemma3_4b_activation_hbm_headroom.png",
+    "scope": "Gemma4 E2B on v5litepod-4 and Gemma4 E4B on v5litepod-8; LoRA rank 16, batch 1, max length 2048; activation policy none vs split_offload plus split_remat diagnostic; quality evaluation disabled."
+  },
   "small_model_followup": {
     "summary": "data/gemma3_small_model_activation_followup.csv",
     "raw": "results/small-model-splash-activation-ablation/",

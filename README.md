@@ -8,10 +8,12 @@ for JAX/Tunix training.
   reproduction guide.
 - `02-PACKING/`: the final sequence-packing experiment report, retained summary
   data, figures, and reproduction guide.
-- `03-TILED-MLP/`: the final Gemma3-only tiled gated-MLP experiment report,
+- `03-TILED-MLP/`: the final Gemma3 tiled gated-MLP experiment report plus
+  folded-in Gemma4 boundary rows,
   retained summary data, raw final records, figures, and reproduction guide.
 - `04-ACTIVATION-POLICY/`: the final Gemma3 activation remat/offload policy
-  experiment report, retained data, figures, and reproduction guide.
+  experiment report plus folded-in Gemma4 boundary rows, retained data, figures, and
+  reproduction guide.
 
 Raw TPU traces, checkpoints, smoke outputs, and intermediate reports are kept
 out of the final workstream packages after each result is consolidated.
@@ -25,10 +27,10 @@ python -m pip install .
 
 When installed, the package registers a small `sitecustomize.py` hook. It waits
 for supported Tunix modules to be imported, then applies process-local patches:
-Cut Cross Entropy for Tunix SFT loss, Gemma3 tiled MLP replacement, optional
-Gemma3 Splash Attention, and optional Gemma3 activation remat/offload policies
-for `tunix.models.gemma3.model`. Future patches can live under the same package
-without renaming the project.
+Cut Cross Entropy for Tunix SFT loss, Gemma3/Gemma4 tiled MLP replacement,
+optional Gemma3 Splash Attention, and optional Gemma3/Gemma4 activation
+remat/offload policies. Future patches can live under the same package without
+renaming the project.
 
 Use a regular wheel install when validating startup hooks. Editable installs are
 fine for code hacking, but some environments already provide a system
@@ -48,10 +50,10 @@ Use `TUNIX_ACCEL_DISABLE_CE=1` for a Default CE baseline while keeping other
 autopatches available. Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` to disable all
 automatic patches.
 
-## Gemma3 Tiled MLP Controls
+## Tiled MLP Controls
 
-By default, installed environments automatically patch Tunix Gemma3
-`FeedForward.block` when `tunix.models.gemma3.model` is imported.
+By default, installed environments automatically patch Tunix Gemma3 and Gemma4
+`FeedForward.block` when the corresponding model module is imported.
 
 ```bash
 export TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK=128
@@ -64,10 +66,10 @@ Use `TUNIX_ACCEL_DISABLE_TILED_MLP=1` for a Default MLP baseline while keeping
 other autopatches available. Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` to disable
 all automatic patches.
 
-## Gemma3 Activation Policy Controls
+## Activation Policy Controls
 
 Activation remat/offload is opt-in. By default, installed environments leave
-Tunix Gemma3 decoder layers unchanged.
+Tunix Gemma3 and Gemma4 decoder layers unchanged.
 
 ```bash
 export TUNIX_ACCEL_ACTIVATION_POLICY=split_offload
@@ -95,6 +97,9 @@ adapter is validated as part of the 04 long-context workstream, but the 270M/1B
 follow-up exposed a coverage gap where long-context OOM logs still contained
 dense attention allocations.
 
+Gemma4 Splash Attention is not patched here; Tunix Gemma4 already exposes a
+native `use_flash_attention` path.
+
 ## Cut Cross Entropy Explicit API
 
 ```python
@@ -115,7 +120,7 @@ For full fine-tuning where the LM head must receive gradients:
 from tunix_accel.tunix_lora_ce import use_trainable_lm_head_ce
 ```
 
-## Gemma3 Tiled MLP API
+## Tiled MLP Explicit API
 
 ```python
 from tunix_accel import gemma3_tiled_mlp
@@ -125,11 +130,19 @@ gemma3_tiled_mlp.install(token_chunk=256)
 
 Normal Tunix training code should not need this call. The explicit API is kept
 for notebooks, tests, or scoped experiments; installed environments apply the
-same replacement automatically when Gemma3 is imported. The current adapter is
-Gemma3-specific and supports both dense projection kernels and Qwix-LoRA
+same replacement automatically when Gemma3 or Gemma4 is imported. The current
+Gemma3 and Gemma4 adapters support both dense projection kernels and Qwix-LoRA
 projection deltas.
 
-## Gemma3 Activation Policy API
+For Gemma4:
+
+```python
+from tunix_accel import gemma4_tiled_mlp
+
+gemma4_tiled_mlp.install(token_chunk=256)
+```
+
+## Activation Policy Explicit API
 
 ```python
 from tunix_accel import gemma3_activation_policy
@@ -140,6 +153,14 @@ gemma3_activation_policy.install(policy="split_offload")
 Normal Tunix training code should not need this call when the package is
 installed and `TUNIX_ACCEL_ACTIVATION_POLICY` is set. The explicit API is kept
 for notebooks, tests, or scoped experiments.
+
+For Gemma4:
+
+```python
+from tunix_accel import gemma4_activation_policy
+
+gemma4_activation_policy.install(policy="split_offload")
+```
 
 ## Packing API
 
@@ -182,6 +203,10 @@ token-valid mask as `valid_mask`.
 - Activation policy reproduction guide: `04-ACTIVATION-POLICY/REPRODUCE.md`
 - Activation policy retained data: `04-ACTIVATION-POLICY/data/`
 - Activation policy figures: `04-ACTIVATION-POLICY/assets/`
+- Gemma4 base boundary rows: folded into the existing `01-CCE`, `02-PACKING`,
+  `03-TILED-MLP`, and `04-ACTIVATION-POLICY` reports, data, and figures.
+- Integrated Gemma3/Gemma4 report figures:
+  `tools/plot_integrated_workstream_figures.py`
 - Follow-up research directions: `RESEARCH_DIRECTIONS.md`
 
 Headline retained results:
@@ -192,11 +217,12 @@ Headline retained results:
 - Sequence packing raised useful target-token throughput by 20x+ on short
   OPUS100 EN-FR SFT examples by removing padding waste.
 - Gemma3 Tiled MLP moved the 4B LoRA v5litepod-8 keypoint from Default MLP
-  L4096 compile OOM to Tiled MLP L4096 completion, with L2048 XLA planned HBM
-  moving from 82.9 GiB to 56.5 GiB aggregate.
+  L4096 compile OOM at 20.19 GiB/chip planned HBM to Tiled MLP L4096
+  completion at 14.55 GiB/chip. At L2048, the same readout moved from
+  10.36 GiB/chip to 7.06 GiB/chip.
 - Gemma3 activation offload moved the 4B LoRA v5litepod-8 L4096 keypoint from
-  Default CE/no-policy compile OOM at 177.3 GiB aggregate planned HBM to
-  `split_offload` completion at 115.2 GiB aggregate planned HBM. Plain
+  Default CE/no-policy compile OOM at 22.16 GiB/chip planned HBM to
+  `split_offload` completion at 14.40 GiB/chip planned HBM. Plain
   `split_remat` did not move the boundary. In a separate CCE + Tiled MLP +
   Splash Attention long-context ablation on v5litepod-16, no activation offload
   failed at L32768 with 23.50 GiB/chip planned HBM, while `split_offload`
@@ -204,3 +230,10 @@ Headline retained results:
   `04-ACTIVATION-POLICY/results/small-model-splash-activation-ablation/`
   found a useful 270M offload boundary move, but also exposed dense-attention
   coverage gaps in long-context OOM logs.
+- Gemma4 base boundary rows are folded into the same four workstreams. At LoRA rank
+  16, batch 1, max length 2048: `google/gemma-4-E2B` on `v5litepod-4` shows
+  Default CE, Packing, and Split Remat compile OOM while CCE, Tiled MLP, and
+  Split Offload train; `google/gemma-4-E4B` on `v5litepod-8` shows Default CE,
+  CCE, Packing, and Split Remat compile OOM while Tiled MLP and Split Offload
+  train. These Gemma4 runs are base-checkpoint memory/compile/step-time checks;
+  translation samples and BLEU/chrF are intentionally out of scope.

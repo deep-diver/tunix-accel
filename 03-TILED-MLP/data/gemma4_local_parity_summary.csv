@@ -1,0 +1,7 @@
+area,check,count,result,notes
+Tiled MLP,FeedForward.block parity,1,pass,Tiny Gemma4 model; token_chunk=3; dense projection kernels
+Tiled MLP,FeedForward.__call__ with BLOCK remat parity,1,pass,Tiny Gemma4 model; token_chunk=4
+Tiled MLP,Tunix default SFT loss parity,1,pass,Tiny Gemma4 model through peft_trainer._default_loss_fn
+Tiled MLP,Qwix LoRA projection-delta loss parity,1,pass,Tiny Gemma4 model; rank=4 alpha=8; fallback and direct tiled LoRA paths
+Autopatch,Gemma4 import-time tiled MLP autopatch,1,pass,tunix.models.gemma4.model import installs Gemma4 MLP patch
+Runner,LoRA fallback without get_model_input,1,pass,Tiny Gemma4 model; runner supplies sample tokens/positions/mask to Qwix

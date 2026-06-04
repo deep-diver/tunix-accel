@@ -134,18 +134,20 @@ translation-quality benchmark. The packed run consumed about 1.9x as many target
 tokens while taking about 30% of the wall time. Its BLEU/chrF were in the same
 rough band as the longer unpacked run.
 
-## 6. Fifth Result: The Same Throughput Effect Appears at 1B and 4B
+## 6. Fifth Result: The Same Throughput Effect Appears as Models Scale
 
 The larger-model check intentionally stayed short: 50 optimizer steps. The goal
 was to see whether the same packed-vs-unpacked behavior survives scaling from
-270M to 1B and 4B.
+270M to 1B and 4B. The Gemma4 base fixed-shape check is not shown in this
+throughput figure because it is a different measurement: a compile-boundary
+negative control, not a packed-vs-unpacked throughput run.
 
 ![Gemma3 1B/4B loss vs useful tokens.](./assets/gemma3_1b_4b_loss_vs_useful_tokens.png)
 
 *For the same number of optimizer steps, packed runs move much farther along the
 useful-target-token axis.*
 
-![Gemma3 1B/4B throughput and density.](./assets/gemma3_1b_4b_throughput_and_density.png)
+![Sequence packing throughput and fixed-shape memory readout.](./assets/gemma3_1b_4b_throughput_and_density.png)
 
 *The throughput gain comes from denser steps, not faster steps.*
 
@@ -162,6 +164,20 @@ Ratios:
 | --- | ---: | ---: | ---: | ---: |
 | Gemma3 1B | 20.9x | 21.1x | 9.5x | 1.001x |
 | Gemma3 4B | 23.1x | 23.0x | 9.5x | 0.999x |
+
+Gemma4 fixed-shape negative control, reported separately because it is not a
+throughput/density measurement:
+
+| Model | TPU | Unpacked fixed shape | Packed fixed shape |
+| --- | --- | --- | --- |
+| Gemma4 E2B | v5litepod-4, 4 chips | compile OOM, 16.59/15.75G per chip | compile OOM, 16.59/15.75G per chip |
+| Gemma4 E4B | v5litepod-8, 8 chips | compile OOM, 19.81/15.75G per chip | compile OOM, 19.81/15.75G per chip |
+
+This is expected. Packing changes how many real examples occupy a fixed-shape
+batch; it does not shrink the static model graph for a single already-full
+`batch * max_length` shape. The Gemma4 rows keep the story honest: packing is
+valuable for useful-token throughput, but it should not be sold as the fix for
+model compile-HBM OOM.
 
 ## 7. Interpretation
 
@@ -186,3 +202,4 @@ Ratios:
 - `02-PACKING/data/gemma3_270m_enfr_quality_summary.csv`
 - `02-PACKING/data/gemma3_270m_enfr_translation_samples.md`
 - `02-PACKING/data/gemma3_1b_4b_scale_smoke_summary.csv`
+- `02-PACKING/data/gemma4_base_packing_tpu_l2048_b1.csv`

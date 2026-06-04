@@ -17,6 +17,7 @@ The final retained artifacts are:
   - `02-PACKING/data/gemma3_270m_enfr_quality_summary.csv`
   - `02-PACKING/data/gemma3_270m_enfr_translation_samples.md`
   - `02-PACKING/data/gemma3_1b_4b_scale_smoke_summary.csv`
+  - `02-PACKING/data/gemma4_base_packing_tpu_l2048_b1.csv`
 
 Removed artifacts include raw TPU run directories, full per-step histories,
 checkpoint directories, old smoke outputs, and intermediate result folders.
@@ -153,6 +154,8 @@ Recommended TPU shapes:
 | 270M quality sanity run | `google/gemma-3-270m-it` | `v5litepod-1` | 1 |
 | 1B scale smoke | `google/gemma-3-1b-it` | `v5litepod-4` | 4 |
 | 4B scale smoke | `google/gemma-3-4b-it` | `v5litepod-4` | 4 |
+| Gemma4 E2B boundary row | `google/gemma-4-E2B` | `v5litepod-4` | 4 |
+| Gemma4 E4B boundary row | `google/gemma-4-E4B` | `v5litepod-8` | 8 |
 
 Create a TPU VM:
 
@@ -337,7 +340,44 @@ Final copies are stored as:
 02-PACKING/assets/gemma3_1b_4b_throughput_and_density.png
 ```
 
-## 10. Verification Checklist
+## 10. Reproduce the Gemma4 Base Negative Control
+
+Purpose: confirm that packing does not change the compile boundary for a fixed
+already-full Gemma4 base shape. This is a memory negative control, not a
+useful-token throughput benchmark.
+
+Run default and packed rows on E2B `v5litepod-4`, then repeat on E4B
+`v5litepod-8`:
+
+```bash
+python tools/run_gemma4_base_benchmark.py \
+  --model-size e2b \
+  --variant default \
+  --batch-size 1 \
+  --max-length 2048 \
+  --max-steps 3 \
+  --num-examples 128 \
+  --lora-rank 16 \
+  --outdir /tmp/gemma4-packing-boundary
+
+python tools/run_gemma4_base_benchmark.py \
+  --model-size e2b \
+  --variant packed \
+  --batch-size 1 \
+  --max-length 2048 \
+  --max-steps 3 \
+  --num-examples 128 \
+  --lora-rank 16 \
+  --outdir /tmp/gemma4-packing-boundary
+```
+
+The retained table is:
+
+```text
+02-PACKING/data/gemma4_base_packing_tpu_l2048_b1.csv
+```
+
+## 11. Verification Checklist
 
 After rerunning, the expected qualitative result is:
 

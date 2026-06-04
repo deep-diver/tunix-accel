@@ -1,7 +1,9 @@
 # 04-ACTIVATION-POLICY
 
-This directory contains the retained artifacts for the Gemma3 activation
-remat/offload policy experiment.
+This directory contains the retained artifacts for the activation remat/offload
+policy experiment. The primary TPU result is Gemma3 4B, with Gemma4 base
+boundary rows retained in the same workstream and folded into the main headroom
+figure.
 
 ## Contents
 
@@ -10,7 +12,7 @@ remat/offload policy experiment.
 - `assets/`: final plots used by the report.
 - `data/`: compact CSV/JSON summaries retained from the experiments.
 - `data/raw/`: raw summary, history, and XLA train-step memory reports for the
-  retained runs.
+  retained Gemma3 runs.
 - `results/long-context-splash/`: retained CCE + Tiled MLP + Splash Attention
   long-context frontier with `split_offload`.
 - `results/splash-activation-ablation/`: follow-up ablation that keeps CCE,
@@ -28,9 +30,12 @@ remat/offload policy experiment.
 - `run_gemma_training_benchmark.py`: TPU training runner for activation policy
   keypoints.
 - `run_gemma3_activation_policy_parity.py`: same-model parity runner.
+- `../tools/run_gemma4_base_benchmark.py`: shared Gemma4 base boundary runner
+  used by the 01-04 boundary rows.
 
 The patch implementation itself lives outside this directory in
-`tunix_accel/gemma3_activation_policy.py`.
+`tunix_accel/gemma3_activation_policy.py` and
+`tunix_accel/gemma4_activation_policy.py`.
 
 ## Summary
 
@@ -38,22 +43,30 @@ The experiment targets Gemma3 decoder-layer activation residency. It does not
 change model math. It changes how JAX/NNX saves, rematerializes, or offloads
 intermediate activations during autodiff.
 
-The current scope is deliberately **Gemma3-only** because the drop-in patch
-overrides Tunix Gemma3's `DecoderLayer.__call__` structure.
+The supported drop-in scope is Gemma3 and Gemma4 through explicit
+model-family adapters because decoder-layer call structure differs across
+families.
 
 ## Headline Result
 
 On Gemma3 4B LoRA, batch 1, max length 4096, TPU v5litepod-8:
 
-| CE path | Activation policy | Status | XLA planned HBM, aggregate |
+| CE path | Activation policy | Status | Max/chip planned HBM |
 | --- | --- | --- | ---: |
-| Default CE | none | compile OOM | 177.3 GiB |
-| Default CE | split offload | OK | 115.2 GiB |
+| Default CE | none | compile OOM | 22.16 GiB/chip |
+| Default CE | split offload | OK | 14.40 GiB/chip |
 
 The useful result is narrow but real: named activation offload moved the same
 Default CE training shape from compile OOM to completion. A separate
 `split_remat` diagnostic did not move the boundary, so the headline is
 activation **offload**, not remat alone.
+
+Gemma4 base boundary rows, batch 1, max length 2048, LoRA rank 16:
+
+| Model | TPU | No policy | Split offload |
+| --- | --- | --- | --- |
+| Gemma4 E2B | v5litepod-4, 4 chips | compile OOM | OK |
+| Gemma4 E4B | v5litepod-8, 8 chips | compile OOM | OK |
 
 ## Splash Attention Follow-Up
 
@@ -119,6 +132,14 @@ from tunix_accel import gemma3_activation_policy
 gemma3_activation_policy.install(policy="split_offload")
 ```
 
+For Gemma4:
+
+```python
+from tunix_accel import gemma4_activation_policy
+
+gemma4_activation_policy.install(policy="split_offload")
+```
+
 Normal Tunix training code should not need that explicit call after the package
 is installed and the environment variable is set.
 
@@ -127,7 +148,10 @@ is installed and the environment variable is set.
 Local tests:
 
 ```bash
-python -m pytest -q tests/test_gemma3_activation_policy.py tests/test_autopatch.py
+python -m pytest -q \
+  tests/test_gemma3_activation_policy.py \
+  tests/test_gemma4_activation_policy.py \
+  tests/test_autopatch.py
 ```
 
 The retained TPU validation artifacts are:
@@ -135,10 +159,13 @@ The retained TPU validation artifacts are:
 - Keypoint data: `data/gemma3_4b_activation_policy_keypoints.csv`
 - Same-model parity data: `data/gemma3_4b_activation_policy_parity.json`
 - Small-model follow-up data: `data/gemma3_small_model_activation_followup.csv`
+- Gemma4 boundary data: `data/gemma4_base_activation_policy_tpu_l2048_b1.csv`
+- Gemma4 local parity data: `data/gemma4_local_parity_summary.csv`
 - Final figures:
   - `assets/gemma3_4b_activation_hbm_headroom.png`
   - `assets/gemma3_4b_activation_before_after_memory.png`
   - `assets/gemma3_4b_l4096_activation_frontier.png`
   - `assets/gemma3_4b_l2048_activation_tradeoff.png`
   - `assets/gemma3_small_model_activation_followup.png`
+  - `assets/gemma3_4b_activation_hbm_headroom.png` includes the Gemma4 boundary rows.
   - `results/splash-activation-ablation/splash_activation_offload_ablation.png`

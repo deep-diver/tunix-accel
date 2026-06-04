@@ -11,7 +11,9 @@
     "gemma3_4b_direct_parity.json",
     "gemma3_4b_translation_samples.md",
     "gemma3_4b_validation_history.csv",
-    "gemma3_4b_validation_summary.csv"
+    "gemma3_4b_validation_summary.csv",
+    "gemma4_base_tiled_mlp_tpu_l2048_b1.csv",
+    "gemma4_local_parity_summary.csv"
   ],
   "raw_records": [
     "composition_cce_tiled_summary.csv",
