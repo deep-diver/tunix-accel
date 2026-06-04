@@ -117,9 +117,14 @@ The retained TPU validation artifacts are:
 - Memory/keypoint data: `data/gemma3_4b_context_keypoints.csv`
 - 500-step validation data: `data/gemma3_4b_validation_summary.csv`
 - Same-model parity data: `data/gemma3_4b_direct_parity.json`
+- Large-model composition data:
+  `data/gemma3_large_offload_free_composition_summary.csv`
 - Gemma4 boundary data: `data/gemma4_base_tiled_mlp_tpu_l2048_b1.csv`
 - Gemma4 local parity data: `data/gemma4_local_parity_summary.csv`
 - Final figures: `assets/gemma3_4b_context_boundary_memory.png` and
   `assets/gemma3_4b_validation_summary.png`
 - Main memory-boundary figure with Gemma4 rows folded in:
   `assets/gemma3_4b_context_boundary_memory.png`
+- Large-model composition figures:
+  `assets/gemma3_large_offload_free_composition_frontier.png` and
+  `assets/gemma3_large_offload_free_composition_speed.png`

@@ -3,7 +3,9 @@
   "final_assets": [
     "gemma3_4b_cce_composition_smoke.png",
     "gemma3_4b_context_boundary_memory.png",
-    "gemma3_4b_validation_summary.png"
+    "gemma3_4b_validation_summary.png",
+    "gemma3_large_offload_free_composition_frontier.png",
+    "gemma3_large_offload_free_composition_speed.png"
   ],
   "final_data": [
     "gemma3_4b_cce_composition_summary.csv",
@@ -12,6 +14,7 @@
     "gemma3_4b_translation_samples.md",
     "gemma3_4b_validation_history.csv",
     "gemma3_4b_validation_summary.csv",
+    "gemma3_large_offload_free_composition_summary.csv",
     "gemma4_base_tiled_mlp_tpu_l2048_b1.csv",
     "gemma4_local_parity_summary.csv"
   ],

@@ -12,12 +12,15 @@ The final retained artifacts are:
   - `03-TILED-MLP/assets/gemma3_4b_context_boundary_memory.png`
   - `03-TILED-MLP/assets/gemma3_4b_validation_summary.png`
   - `03-TILED-MLP/assets/gemma3_4b_cce_composition_smoke.png`
+  - `03-TILED-MLP/assets/gemma3_large_offload_free_composition_frontier.png`
+  - `03-TILED-MLP/assets/gemma3_large_offload_free_composition_speed.png`
 - Summary data:
   - `03-TILED-MLP/data/gemma3_4b_context_keypoints.csv`
   - `03-TILED-MLP/data/gemma3_4b_validation_summary.csv`
   - `03-TILED-MLP/data/gemma3_4b_validation_history.csv`
   - `03-TILED-MLP/data/gemma3_4b_direct_parity.json`
   - `03-TILED-MLP/data/gemma3_4b_cce_composition_summary.csv`
+  - `03-TILED-MLP/data/gemma3_large_offload_free_composition_summary.csv`
   - `03-TILED-MLP/data/gemma3_4b_translation_samples.md`
   - `03-TILED-MLP/data/gemma4_base_tiled_mlp_tpu_l2048_b1.csv`
   - `03-TILED-MLP/data/gemma4_local_parity_summary.csv`
@@ -86,6 +89,8 @@ Recommended shape:
 | 4B context keypoints | `google/gemma-3-4b-it` | `v5litepod-8` | 8 |
 | 4B 500-step validation | `google/gemma-3-4b-it` | `v5litepod-8` | 8 |
 | 4B same-model parity | `google/gemma-3-4b-it` | `v5litepod-8` | 8 |
+| 12B offload-free composition | `google/gemma-3-12b-it` | `v5litepod-4` | 4 |
+| 27B offload-free composition | `google/gemma-3-27b-it` | `v5litepod-8` | 8 |
 | Gemma4 E2B boundary row | `google/gemma-4-E2B` | `v5litepod-4` | 4 |
 | Gemma4 E4B boundary row | `google/gemma-4-E4B` | `v5litepod-8` | 8 |
 
@@ -338,4 +343,98 @@ loss. Final compact copy:
 
 ```text
 03-TILED-MLP/data/gemma3_4b_cce_composition_summary.csv
+```
+
+## 10. Reproduce the Large-Model Composition Check
+
+Purpose: separate the practical offload-free composition from slower activation
+remat/offload paths. This is not a new optimization; it reuses existing CCE,
+Tiled MLP, and Gemma3 Splash Attention patches.
+
+Packing is not part of this check because the measurement holds batch size and
+context length fixed. Packing should be evaluated as a useful-token-density
+optimization, not as a per-step HBM kernel replacement.
+
+12B on `v5litepod-4`:
+
+```bash
+OUT=/tmp/gemma3-large-composition
+
+python tools/run_gemma3_large_patch_sweep.py \
+  --model-size 12b \
+  --variants tiled_mlp \
+  --contexts 1280,1536 \
+  --extra-stacked-contexts "" \
+  --batch-sizes 1 \
+  --num-examples 64 \
+  --max-steps 4 \
+  --outdir "$OUT" \
+  --force
+
+python tools/run_gemma3_large_patch_sweep.py \
+  --model-size 12b \
+  --variants fast_stack \
+  --contexts 1536,2048 \
+  --extra-stacked-contexts "" \
+  --batch-sizes 1 \
+  --num-examples 64 \
+  --max-steps 4 \
+  --outdir "$OUT" \
+  --force
+
+python tools/run_gemma3_large_patch_sweep.py \
+  --model-size 12b \
+  --variants fast_stack_split_remat \
+  --contexts 2048,3072 \
+  --extra-stacked-contexts "" \
+  --batch-sizes 1 \
+  --num-examples 64 \
+  --max-steps 4 \
+  --outdir "$OUT" \
+  --force
+```
+
+27B on `v5litepod-8`:
+
+```bash
+OUT=/tmp/gemma3-large-composition
+
+python tools/run_gemma3_large_patch_sweep.py \
+  --model-size 27b \
+  --variants tiled_mlp \
+  --contexts 640,768 \
+  --extra-stacked-contexts "" \
+  --batch-sizes 1 \
+  --num-examples 64 \
+  --max-steps 4 \
+  --outdir "$OUT" \
+  --force
+
+python tools/run_gemma3_large_patch_sweep.py \
+  --model-size 27b \
+  --variants fast_stack \
+  --contexts 768,1024 \
+  --extra-stacked-contexts "" \
+  --batch-sizes 1 \
+  --num-examples 64 \
+  --max-steps 4 \
+  --outdir "$OUT" \
+  --force
+
+python tools/run_gemma3_large_patch_sweep.py \
+  --model-size 27b \
+  --variants fast_stack_split_remat \
+  --contexts 1024,1536 \
+  --extra-stacked-contexts "" \
+  --batch-sizes 1 \
+  --num-examples 64 \
+  --max-steps 4 \
+  --outdir "$OUT" \
+  --force
+```
+
+Final compact copy:
+
+```text
+03-TILED-MLP/data/gemma3_large_offload_free_composition_summary.csv
 ```

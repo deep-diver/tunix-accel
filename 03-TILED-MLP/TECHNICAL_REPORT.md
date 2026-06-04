@@ -176,6 +176,45 @@ This is only a composition smoke. It says the patches can coexist and that the
 combined memory plan moved in the expected direction. It is not the headline
 quality result for either patch.
 
+We later folded the large-model composition probe into this section as well.
+This was not a new optimization. It was an ablation of combinations that already
+existed in the package, meant to separate the practical offload-free stack from
+the much slower activation-remat/offload paths seen in the large Gemma3 sweep.
+
+The offload-free stack in the table below means:
+
+```text
+Cut Cross Entropy + Tiled MLP + Gemma3 Splash Attention
+```
+
+Packing is intentionally not part of this fixed-shape HBM table. Packing is an
+input-pipeline/token-density optimization: it changes how many useful training
+tokens fit into a batch. The table below holds `batch_size` and `max_length`
+fixed and asks whether a single train-step shape compiles and how fast it runs.
+In a practical training recipe, Packing can be used alongside CCE and Tiled MLP,
+but it answers a different question.
+
+![Gemma3 12B/27B offload-free composition frontier.](./assets/gemma3_large_offload_free_composition_frontier.png)
+
+![Gemma3 12B/27B offload-free composition speed tradeoff.](./assets/gemma3_large_offload_free_composition_speed.png)
+
+| Model | TPU | Variant | Longest completed context | First observed OOM | XLA HBM at longest success | Mean step |
+| --- | --- | --- | ---: | --- | ---: | ---: |
+| 12B | v5litepod-4, 4 chips | Default | 512 | L1024 at 17.42 GiB/chip | 12.39 GiB/chip | 0.35s |
+| 12B | v5litepod-4, 4 chips | Tiled MLP | 1280 | L1536 at 16.68 GiB/chip | 15.33 GiB/chip | 0.44s |
+| 12B | v5litepod-4, 4 chips | CCE + Tiled MLP + Splash | 2048 | not probed beyond L2048 | 13.96 GiB/chip | 0.86s |
+| 12B | v5litepod-4, 4 chips | CCE + Tiled MLP + Splash + split remat | 3072 | not probed beyond L3072 | 11.94 GiB/chip | 27.78s |
+| 27B | v5litepod-8, 8 chips | Default | 512 | L1024 at 24.66 GiB/chip | 14.52 GiB/chip | 1.03s |
+| 27B | v5litepod-8, 8 chips | Tiled MLP | 640 | L768 at 16.78 GiB/chip | 13.72 GiB/chip | 0.38s |
+| 27B | v5litepod-8, 8 chips | CCE + Tiled MLP + Splash | 1024 | not probed beyond L1024 | 14.31 GiB/chip | 0.70s |
+| 27B | v5litepod-8, 8 chips | CCE + Tiled MLP + Splash + split remat | 1536 | not probed beyond L1536 | 13.38 GiB/chip | 39.13s |
+
+The useful reading is narrow. CCE, Tiled MLP, and Splash Attention compose into
+a practical offload-free path that moves the large-model context boundary while
+remaining under roughly one second per post-compile step in these smoke runs.
+Split remat is useful as a stress path for making larger shapes fit, but it is
+not a practical default here.
+
 ## 7. Tradeoffs And Limits
 
 Tiled MLP pays for memory with recompute. At the same L2048 training shape,
