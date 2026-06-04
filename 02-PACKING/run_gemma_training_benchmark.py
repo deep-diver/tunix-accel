@@ -119,6 +119,60 @@ def configure_autopatch(*, allow_autopatch: bool) -> None:
     )
 
 
+def collect_accel_status() -> dict[str, Any]:
+  """Returns lightweight patch-status instrumentation for benchmark summaries."""
+  status: dict[str, Any] = {
+      "disable_autopatch_env": os.environ.get(
+          "TUNIX_ACCEL_DISABLE_AUTOPATCH",
+          "",
+      ),
+      "disable_ce_env": os.environ.get("TUNIX_ACCEL_DISABLE_CE", ""),
+      "disable_tiled_mlp_env": os.environ.get(
+          "TUNIX_ACCEL_DISABLE_TILED_MLP",
+          "",
+      ),
+      "disable_activation_policy_env": os.environ.get(
+          "TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY",
+          "",
+      ),
+      "activation_policy_env": os.environ.get(
+          "TUNIX_ACCEL_ACTIVATION_POLICY",
+          "",
+      ),
+      "enable_splash_attention_env": os.environ.get(
+          "TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION",
+          "",
+      ),
+      "enable_gemma4_hf_loader_env": os.environ.get(
+          "TUNIX_ACCEL_ENABLE_GEMMA4_HF_LOADER",
+          "",
+      ),
+  }
+  modules = {
+      "cce_installed": "tunix_accel.tunix_patch",
+      "gemma3_tiled_mlp_installed": "tunix_accel.gemma3_tiled_mlp",
+      "gemma3_activation_policy_installed": (
+          "tunix_accel.gemma3_activation_policy"
+      ),
+      "gemma3_splash_attention_installed": (
+          "tunix_accel.gemma3_splash_attention"
+      ),
+      "gemma4_tiled_mlp_installed": "tunix_accel.gemma4_tiled_mlp",
+      "gemma4_activation_policy_installed": (
+          "tunix_accel.gemma4_activation_policy"
+      ),
+  }
+  for key, module_name in modules.items():
+    try:
+      module = __import__(module_name, fromlist=["is_installed"])
+      is_installed = getattr(module, "is_installed", None)
+      status[key] = bool(is_installed()) if callable(is_installed) else False
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+      status[key] = False
+      status[f"{key}_error"] = type(exc).__name__
+  return status
+
+
 def load_tokenizer(args: argparse.Namespace) -> TokenizerBundle:
   if args.tokenizer_source == "sentencepiece":
     from tunix.models.gemma3 import params as gemma3_params  # pylint: disable=import-outside-toplevel
@@ -201,6 +255,9 @@ def load_opus100_records(
     args: argparse.Namespace,
     tokenizer_bundle: TokenizerBundle | None = None,
 ) -> TokenizedSftDataset:
+  if args.dataset_mode == "synthetic":
+    return load_synthetic_records(args, tokenizer_bundle)
+
   from datasets import load_dataset  # pylint: disable=import-outside-toplevel
 
   tokenizer_bundle = tokenizer_bundle or load_tokenizer(args)
@@ -208,6 +265,44 @@ def load_opus100_records(
       "Helsinki-NLP/opus-100",
       "en-fr",
       split=f"train[:{args.num_examples}]",
+  )
+
+
+def load_synthetic_records(
+    args: argparse.Namespace,
+    tokenizer_bundle: TokenizerBundle | None = None,
+) -> TokenizedSftDataset:
+  """Creates deterministic EN-FR shaped records without network access."""
+  tokenizer_bundle = tokenizer_bundle or load_tokenizer(args)
+  records = []
+  for idx in range(args.num_examples):
+    source = (
+        f"synthetic source sentence {idx}. "
+        + "The quick training probe uses repeated neutral text. " * 4
+    )
+    target = (
+        f"phrase cible synthetique {idx}. "
+        + "bonjour monde entrainement verification. " * 6
+    )
+    records.append(
+        tokenize_sft_record(
+            encode=tokenizer_bundle.encode,
+            eos_id=tokenizer_bundle.eos_id,
+            source=source,
+            target=target,
+            example_id=idx,
+        )
+    )
+  return TokenizedSftDataset(
+      name="synthetic-en-fr-shaped",
+      model_id=args.model_id,
+      tokenizer_source=args.tokenizer_source,
+      pad_token_id=tokenizer_bundle.pad_id,
+      records=records,
+      source=(
+          "Deterministic synthetic EN-FR shaped text, Tunix Gemma prompt "
+          "wrapper, target-only loss mask, target EOS"
+      ),
   )
   records = []
   for idx, row in enumerate(dataset):
@@ -551,6 +646,9 @@ def apply_lora_if_requested(model, mesh, args: argparse.Namespace):
 def create_model(mesh, args: argparse.Namespace):
   from tunix.cli.utils import model as model_lib  # pylint: disable=import-outside-toplevel
 
+  if should_use_gemma4_hf_loader(args):
+    return create_gemma4_hf_model(mesh, args)
+
   model_config = {
       "model_name": infer_model_name(args.model_id),
       "model_source": args.model_source,
@@ -568,6 +666,70 @@ def create_model(mesh, args: argparse.Namespace):
       "add_eos": False,
   }
   model, _ = model_lib.create_model(model_config, tokenizer_config, mesh)
+  return apply_lora_if_requested(model, mesh, args)
+
+
+def should_use_gemma4_hf_loader(args: argparse.Namespace) -> bool:
+  """Whether to bypass Tunix AutoModel's current Gemma4 HF guard."""
+  enabled = os.environ.get("TUNIX_ACCEL_ENABLE_GEMMA4_HF_LOADER", "").lower()
+  return (
+      enabled in {"1", "true", "yes", "on"}
+      and args.model_source == "huggingface"
+      and "gemma-4" in args.model_id.lower()
+  )
+
+
+def create_gemma4_hf_model(mesh, args: argparse.Namespace):
+  """Loads Gemma4 HF safetensors through Tunix's native Gemma4 tensor loader.
+
+  google-tunix 0.1.6 contains Gemma4 configs and safetensor parameter loaders,
+  but AutoModel's public Hugging Face path still rejects Gemma-family models.
+  This opt-in path keeps the same config/parameter loader while skipping only
+  that source guard.
+  """
+  from tunix.models import automodel  # pylint: disable=import-outside-toplevel
+
+  model_name = infer_model_name(args.model_id)
+  model_dir = args.model_download_path or args.model_path
+  if not model_dir:
+    raise ValueError(
+        "Gemma4 HF loader requires --model-download-path or --model-path."
+    )
+  model_dir_path = Path(model_dir)
+  if not (model_dir_path / "model.safetensors.index.json").exists():
+    if not args.allow_download:
+      raise FileNotFoundError(
+          "Gemma4 HF safetensors snapshot is missing and --allow-download was "
+          "not set: " + str(model_dir_path)
+      )
+    model_dir = automodel.download_model(
+        args.model_id,
+        args.model_download_path,
+        automodel.ModelSource.HUGGINGFACE,
+    )
+    model_dir_path = Path(model_dir)
+
+  try:
+    model_config = automodel.call_model_config(model_name)
+  except AttributeError:
+    model_config = automodel.call_model_config(
+        model_name.replace("gemma-4-", "gemma4_")
+    )
+  if mesh is None:
+    model = automodel.create_model_from_safe_tensors(
+        model_name,
+        str(model_dir_path),
+        model_config,
+        mesh,
+    )
+  else:
+    with mesh:
+      model = automodel.create_model_from_safe_tensors(
+          model_name,
+          str(model_dir_path),
+          model_config,
+          mesh,
+      )
   return apply_lora_if_requested(model, mesh, args)
 
 
@@ -1015,6 +1177,7 @@ def run_variant(
           "google_tunix_version": package_version("google-tunix"),
           "tunix_accel_version": package_version("tunix-accel"),
       },
+      "accel": collect_accel_status(),
       "packing": prepared.packing_summary,
       "quality": quality,
   }
@@ -1221,6 +1384,11 @@ def main() -> None:
   parser.add_argument("--tokenizer-source", choices=["sentencepiece", "huggingface"], default="sentencepiece")
   parser.add_argument("--tokenizer-path", default=GEMMA3_TOKENIZER_GCS)
   parser.add_argument("--allow-download", action="store_true")
+  parser.add_argument(
+      "--dataset-mode",
+      choices=["opus100", "synthetic"],
+      default="opus100",
+  )
   parser.add_argument("--num-examples", type=int, default=5000)
   parser.add_argument("--variants", default="unpacked,packed")
   parser.add_argument("--batch-size", type=int, default=16)

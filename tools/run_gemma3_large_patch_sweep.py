@@ -48,7 +48,7 @@ VARIANT_ENV = {
         "TUNIX_ACCEL_DISABLE_AUTOPATCH": "1",
     },
     "cce": {
-        "TUNIX_ACCEL_DISABLE_AUTOPATCH": "",
+        "TUNIX_ACCEL_DISABLE_AUTOPATCH": "0",
         "TUNIX_ACCEL_DISABLE_CE": "",
         "TUNIX_ACCEL_DISABLE_TILED_MLP": "1",
         "TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY": "1",
@@ -56,7 +56,7 @@ VARIANT_ENV = {
         "TUNIX_ACCEL_ACTIVATION_POLICY": "none",
     },
     "tiled_mlp": {
-        "TUNIX_ACCEL_DISABLE_AUTOPATCH": "",
+        "TUNIX_ACCEL_DISABLE_AUTOPATCH": "0",
         "TUNIX_ACCEL_DISABLE_CE": "1",
         "TUNIX_ACCEL_DISABLE_TILED_MLP": "",
         "TUNIX_ACCEL_TILED_MLP_FALLBACK_ON_LORA": "0",
@@ -65,7 +65,7 @@ VARIANT_ENV = {
         "TUNIX_ACCEL_ACTIVATION_POLICY": "none",
     },
     "split_offload": {
-        "TUNIX_ACCEL_DISABLE_AUTOPATCH": "",
+        "TUNIX_ACCEL_DISABLE_AUTOPATCH": "0",
         "TUNIX_ACCEL_DISABLE_CE": "1",
         "TUNIX_ACCEL_DISABLE_TILED_MLP": "1",
         "TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY": "",
@@ -73,7 +73,7 @@ VARIANT_ENV = {
         "TUNIX_ACCEL_ACTIVATION_POLICY": "split_offload",
     },
     "splash": {
-        "TUNIX_ACCEL_DISABLE_AUTOPATCH": "",
+        "TUNIX_ACCEL_DISABLE_AUTOPATCH": "0",
         "TUNIX_ACCEL_DISABLE_CE": "1",
         "TUNIX_ACCEL_DISABLE_TILED_MLP": "1",
         "TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY": "1",
@@ -81,7 +81,7 @@ VARIANT_ENV = {
         "TUNIX_ACCEL_ACTIVATION_POLICY": "none",
     },
     "stacked": {
-        "TUNIX_ACCEL_DISABLE_AUTOPATCH": "",
+        "TUNIX_ACCEL_DISABLE_AUTOPATCH": "0",
         "TUNIX_ACCEL_DISABLE_CE": "",
         "TUNIX_ACCEL_DISABLE_TILED_MLP": "",
         "TUNIX_ACCEL_TILED_MLP_FALLBACK_ON_LORA": "0",
@@ -322,9 +322,26 @@ def run_case(
       "run_dir": str(run_dir),
       "xla_report": str(report) if report else "",
       "xla_train_step_gib_per_chip": parse_xla_total_gib(report),
+      "requested_autopatch": variant not in {"default", "packed_default"},
       "status": "ok" if summary else "failed",
   }
   if summary:
+    row["default_ce"] = summary.get("default_ce")
+    row["autopatch_effective"] = not bool(summary.get("default_ce"))
+    accel = summary.get("accel", {})
+    if isinstance(accel, dict):
+      row.update({
+          "cce_installed": accel.get("cce_installed"),
+          "gemma3_tiled_mlp_installed": accel.get(
+              "gemma3_tiled_mlp_installed"
+          ),
+          "gemma3_activation_policy_installed": accel.get(
+              "gemma3_activation_policy_installed"
+          ),
+          "gemma3_splash_attention_installed": accel.get(
+              "gemma3_splash_attention_installed"
+          ),
+      })
     row.update({
         "steps_recorded": summary.get("steps_recorded"),
         "final_loss": summary.get("final_loss"),

@@ -1,0 +1,9 @@
+{
+  "status": "corrected",
+  "measurement": "XLA train-step planned HBM per chip from buffer assignment",
+  "hbm_limit_gib_per_chip": 15.75,
+  "full_raw_archives": {
+    "12b": "gs://gcp-ml-172005-ddpm-training/tunix-large-sweep/gemma3-large-patch-sweep-corrected-12b.tar.gz",
+    "27b": "gs://gcp-ml-172005-ddpm-training/tunix-large-sweep/gemma3-large-patch-sweep-corrected-27b.tar.gz"
+  }
+}
