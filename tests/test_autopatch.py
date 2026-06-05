@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -17,6 +18,11 @@ def _run_python(code: str, *, env: dict[str, str] | None = None) -> str:
   run_env = os.environ.copy()
   run_env.pop("TUNIX_ACCEL_DISABLE_AUTOPATCH", None)
   run_env.pop("TUNIX_ACCEL_DISABLE_CE", None)
+  run_env.pop("TUNIX_ACCEL_ENABLE_LORA_FA", None)
+  run_env.pop("TUNIX_ACCEL_LORA_FA_MODE", None)
+  run_env.pop("TUNIX_ACCEL_LORA_FA_ALPHA", None)
+  run_env.pop("TUNIX_ACCEL_LORA_FA_CORRECTION_EPS", None)
+  run_env.pop("TUNIX_ACCEL_LORA_FA_USE_RSLORA", None)
   run_env.pop("TUNIX_ACCEL_DISABLE_TILED_MLP", None)
   run_env.pop("TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY", None)
   run_env.pop("TUNIX_ACCEL_ACTIVATION_POLICY", None)
@@ -83,6 +89,49 @@ def test_tunix_packing_api_autopatches_on_peft_trainer_import() -> None:
       env={"TUNIX_ACCEL_DISABLE_CE": "true"},
   )
   assert output.endswith("tunix_packing_api_autopatch=ok")
+
+
+def test_lora_fa_autopatch_is_opt_in() -> None:
+  output = _run_python(
+      """
+      from tunix.sft import peft_trainer
+      from tunix_accel import lora_fa
+
+      assert lora_fa.is_installed()
+      assert lora_fa._STATE.config.mode == "freeze_a"
+      assert lora_fa._STATE.config.lora_alpha == 8.0
+      assert getattr(peft_trainer, "_tunix_accel_lora_fa_autopatched", False)
+      print("lora_fa_autopatch=ok")
+      """,
+      env={
+          "TUNIX_ACCEL_DISABLE_CE": "true",
+          "TUNIX_ACCEL_ENABLE_LORA_FA": "true",
+          "TUNIX_ACCEL_LORA_FA_MODE": "freeze_a",
+          "TUNIX_ACCEL_LORA_FA_ALPHA": "8",
+      },
+  )
+  assert output.endswith("lora_fa_autopatch=ok")
+
+
+def test_benchmark_allow_autopatch_overrides_disabled_env(monkeypatch) -> None:
+  module_path = REPO_ROOT / "02-PACKING" / "run_gemma_training_benchmark.py"
+  spec = importlib.util.spec_from_file_location("packing_benchmark", module_path)
+  assert spec is not None
+  module = importlib.util.module_from_spec(spec)
+  assert spec.loader is not None
+  sys.modules[spec.name] = module
+  spec.loader.exec_module(module)
+
+  from tunix_accel import autopatch
+
+  calls = []
+  monkeypatch.setenv("TUNIX_ACCEL_DISABLE_AUTOPATCH", "true")
+  monkeypatch.setattr(autopatch, "enable", lambda: calls.append("enabled"))
+
+  module.configure_autopatch(allow_autopatch=True)
+
+  assert os.environ["TUNIX_ACCEL_DISABLE_AUTOPATCH"] == "false"
+  assert calls == ["enabled"]
 
 
 def test_gemma3_tiled_mlp_autopatch_can_be_disabled() -> None:

@@ -16,6 +16,8 @@ for JAX/Tunix training.
   reproduction guide.
 - `05-GEMMA3-LARGE-SWEEP/`: Gemma3 12B/27B large-model TPU v5e patch sweep,
   retained summaries, figures, and reproduction guide.
+- `06-LORA-FA/`: in-progress LoRA-FA workstream for B-only Qwix LoRA training
+  and corrected B-gradient experiments.
 
 Raw TPU traces, checkpoints, smoke outputs, and intermediate reports are kept
 out of the final workstream packages after each result is consolidated.
@@ -168,6 +170,30 @@ from tunix_accel import gemma4_activation_policy
 
 gemma4_activation_policy.install(policy="split_offload")
 ```
+
+## LoRA-FA Experimental API
+
+LoRA-FA is in progress and should be enabled explicitly while validating it:
+
+```bash
+export TUNIX_ACCEL_ENABLE_LORA_FA=true
+export TUNIX_ACCEL_LORA_FA_MODE=corrected_b
+export TUNIX_ACCEL_LORA_FA_ALPHA=32.0
+export TUNIX_ACCEL_LORA_FA_CORRECTION_EPS=1e-8
+```
+
+For notebooks or scoped local tests:
+
+```python
+from tunix_accel import lora_fa
+from tunix_accel.lora_fa import LoRAFAConfig
+
+lora_fa.install(LoRAFAConfig(mode="corrected_b", lora_alpha=32.0))
+```
+
+This keeps Qwix LoRA A/B tensors as `nnx.LoRAParam` values for checkpoint
+compatibility, but narrows Tunix training to B-only gradients and optimizer
+state. The corrected mode applies the LoRA-FA rank-space B-gradient correction.
 
 ## Packing API
 

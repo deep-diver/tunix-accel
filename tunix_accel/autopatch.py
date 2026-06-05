@@ -23,6 +23,11 @@ ENV_DISABLE = "TUNIX_ACCEL_DISABLE_AUTOPATCH"
 ENV_DISABLE_CE = "TUNIX_ACCEL_DISABLE_CE"
 ENV_TOKEN_CHUNK = "TUNIX_ACCEL_CE_TOKEN_CHUNK"
 ENV_VOCAB_CHUNK = "TUNIX_ACCEL_CE_VOCAB_CHUNK"
+ENV_ENABLE_LORA_FA = "TUNIX_ACCEL_ENABLE_LORA_FA"
+ENV_LORA_FA_MODE = "TUNIX_ACCEL_LORA_FA_MODE"
+ENV_LORA_FA_ALPHA = "TUNIX_ACCEL_LORA_FA_ALPHA"
+ENV_LORA_FA_CORRECTION_EPS = "TUNIX_ACCEL_LORA_FA_CORRECTION_EPS"
+ENV_LORA_FA_USE_RSLORA = "TUNIX_ACCEL_LORA_FA_USE_RSLORA"
 ENV_DISABLE_TILED_MLP = "TUNIX_ACCEL_DISABLE_TILED_MLP"
 ENV_TILED_MLP_TOKEN_CHUNK = "TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK"
 ENV_TILED_MLP_FALLBACK_ON_LORA = "TUNIX_ACCEL_TILED_MLP_FALLBACK_ON_LORA"
@@ -36,6 +41,9 @@ ENV_ACTIVATION_OFFLOAD_SRC = "TUNIX_ACCEL_ACTIVATION_OFFLOAD_SRC"
 ENV_ACTIVATION_OFFLOAD_DST = "TUNIX_ACCEL_ACTIVATION_OFFLOAD_DST"
 DEFAULT_TOKEN_CHUNK = 128
 DEFAULT_VOCAB_CHUNK = 8192
+DEFAULT_LORA_FA_MODE = "corrected_b"
+DEFAULT_LORA_FA_ALPHA = 32.0
+DEFAULT_LORA_FA_CORRECTION_EPS = 1e-8
 DEFAULT_TILED_MLP_TOKEN_CHUNK = 128
 DEFAULT_TILED_MLP_LORA_ALPHA = 32.0
 DEFAULT_ACTIVATION_POLICY = "none"
@@ -80,6 +88,36 @@ def _vocab_chunk_from_env() -> int:
   except ValueError:
     return DEFAULT_VOCAB_CHUNK
   return vocab_chunk if vocab_chunk > 0 else DEFAULT_VOCAB_CHUNK
+
+
+def _lora_fa_mode_from_env() -> str:
+  value = os.environ.get(ENV_LORA_FA_MODE, DEFAULT_LORA_FA_MODE)
+  value = value.strip().lower()
+  if value in {"freeze_a", "corrected_b"}:
+    return value
+  return DEFAULT_LORA_FA_MODE
+
+
+def _lora_fa_alpha_from_env() -> float:
+  raw = os.environ.get(ENV_LORA_FA_ALPHA)
+  if not raw:
+    return DEFAULT_LORA_FA_ALPHA
+  try:
+    alpha = float(raw)
+  except ValueError:
+    return DEFAULT_LORA_FA_ALPHA
+  return alpha if alpha > 0 else DEFAULT_LORA_FA_ALPHA
+
+
+def _lora_fa_correction_eps_from_env() -> float:
+  raw = os.environ.get(ENV_LORA_FA_CORRECTION_EPS)
+  if not raw:
+    return DEFAULT_LORA_FA_CORRECTION_EPS
+  try:
+    eps = float(raw)
+  except ValueError:
+    return DEFAULT_LORA_FA_CORRECTION_EPS
+  return eps if eps >= 0 else DEFAULT_LORA_FA_CORRECTION_EPS
 
 
 def _tiled_mlp_token_chunk_from_env() -> int:
@@ -151,9 +189,30 @@ def _patch_tunix_packing_api(module: ModuleType | None = None) -> None:
   setattr(target, "_tunix_accel_packing_api_autopatched", True)
 
 
+def _patch_lora_fa(module: ModuleType | None = None) -> None:
+  if not _env_enabled() or not _env_bool(ENV_ENABLE_LORA_FA, default=False):
+    return
+  target = module or sys.modules.get(CCE_TARGET_MODULE)
+  if target is None or getattr(target, "_tunix_accel_lora_fa_autopatched", False):
+    return
+
+  from tunix_accel import lora_fa  # pylint: disable=import-outside-toplevel
+
+  lora_fa.install(
+      lora_fa.LoRAFAConfig(
+          mode=_lora_fa_mode_from_env(),
+          lora_alpha=_lora_fa_alpha_from_env(),
+          correction_eps=_lora_fa_correction_eps_from_env(),
+          use_rslora=_env_bool(ENV_LORA_FA_USE_RSLORA, default=False),
+      )
+  )
+  setattr(target, "_tunix_accel_lora_fa_autopatched", True)
+
+
 def _patch_peft_trainer(module: ModuleType | None = None) -> None:
   _patch_tunix_packing_api(module)
   _patch_cce(module)
+  _patch_lora_fa(module)
 
 
 def _patch_gemma3_tiled_mlp(module: ModuleType | None = None) -> None:

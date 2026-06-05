@@ -1,0 +1,13 @@
+{
+  "name": "opus100-en-fr-gemma3-it",
+  "model_id": "google/gemma-3-12b-it",
+  "tokenizer_source": "sentencepiece",
+  "pad_token_id": 0,
+  "source": "Helsinki-NLP/opus-100 en-fr train split, Tunix Gemma3 IT prompt wrapper, target-only loss mask, target EOS",
+  "num_examples": 512,
+  "mean_length": 34.478515625,
+  "p50_length": 28.0,
+  "p90_length": 49.900000000000034,
+  "max_length": 208,
+  "eval_examples": 0
+}

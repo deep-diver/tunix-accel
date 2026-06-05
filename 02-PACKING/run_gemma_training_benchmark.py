@@ -105,10 +105,10 @@ def configure_autopatch(*, allow_autopatch: bool) -> None:
       "on",
   }
   if allow_autopatch:
-    if not disabled:
-      from tunix_accel import autopatch  # pylint: disable=import-outside-toplevel
+    os.environ["TUNIX_ACCEL_DISABLE_AUTOPATCH"] = "false"
+    from tunix_accel import autopatch  # pylint: disable=import-outside-toplevel
 
-      autopatch.enable()
+    autopatch.enable()
     return
 
   if not disabled:
@@ -150,6 +150,7 @@ def collect_accel_status() -> dict[str, Any]:
   }
   modules = {
       "cce_installed": "tunix_accel.tunix_patch",
+      "lora_fa_installed": "tunix_accel.lora_fa",
       "gemma3_tiled_mlp_installed": "tunix_accel.gemma3_tiled_mlp",
       "gemma3_activation_policy_installed": (
           "tunix_accel.gemma3_activation_policy"
@@ -702,11 +703,7 @@ def create_gemma4_hf_model(mesh, args: argparse.Namespace):
           "Gemma4 HF safetensors snapshot is missing and --allow-download was "
           "not set: " + str(model_dir_path)
       )
-    model_dir = automodel.download_model(
-        args.model_id,
-        args.model_download_path,
-        automodel.ModelSource.HUGGINGFACE,
-    )
+    model_dir = download_hf_snapshot_noninteractive(args.model_id, model_dir)
     model_dir_path = Path(model_dir)
 
   try:
@@ -731,6 +728,34 @@ def create_gemma4_hf_model(mesh, args: argparse.Namespace):
           mesh,
       )
   return apply_lora_if_requested(model, mesh, args)
+
+
+def read_hf_token_noninteractive() -> str | None:
+  token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+  if token:
+    return token
+  token_path = Path.home() / ".cache" / "huggingface" / "token"
+  if token_path.exists():
+    token = token_path.read_text().strip()
+    return token or None
+  return None
+
+
+def download_hf_snapshot_noninteractive(model_id: str, model_download_path: str) -> str:
+  """Downloads an HF snapshot without triggering interactive login prompts."""
+  import huggingface_hub as hf  # pylint: disable=import-outside-toplevel
+
+  token = read_hf_token_noninteractive()
+  all_files = hf.list_repo_files(model_id, token=token)
+  filtered_files = [filename for filename in all_files if not filename.startswith("original/")]
+  for filename in filtered_files:
+    hf.hf_hub_download(
+        repo_id=model_id,
+        filename=filename,
+        local_dir=model_download_path,
+        token=token,
+    )
+  return model_download_path
 
 
 def create_trainer(model, args: argparse.Namespace, run_dir: Path):
@@ -996,6 +1021,18 @@ def run_variant(
   start_wall = time.perf_counter()
   with jax.set_mesh(mesh):
     model = create_model(mesh, args)
+    lora_fa_metrics: dict[str, Any] = {}
+    lora_snapshot: dict[str, Any] = {}
+    try:
+      from tunix_accel import lora_fa  # pylint: disable=import-outside-toplevel
+
+      lora_fa_metrics["parameter_summary_before"] = (
+          lora_fa.lora_fa_parameter_summary(model)
+      )
+      if args.capture_lora_value_deltas:
+        lora_snapshot = lora_fa.lora_value_snapshot(model)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+      lora_fa_metrics["collection_error_before"] = repr(exc)
     trainer, logger = create_trainer(model, args, run_dir)
     trainer.is_managed_externally = True
     local_step_times: list[float] = []
@@ -1075,6 +1112,19 @@ def run_variant(
         quality["generation_examples_fit"] = len(generation_rows)
         write_jsonl(run_dir / "translations.jsonl", generation_rows)
       memory_after_quality = device_memory_snapshot(jax)
+      try:
+        from tunix_accel import lora_fa  # pylint: disable=import-outside-toplevel
+
+        lora_fa_metrics["parameter_summary_after"] = (
+            lora_fa.lora_fa_parameter_summary(model)
+        )
+        if lora_snapshot:
+          lora_fa_metrics["value_delta"] = lora_fa.lora_value_delta_summary(
+              lora_snapshot,
+              model,
+          )
+      except Exception as exc:  # pylint: disable=broad-exception-caught
+        lora_fa_metrics["collection_error_after"] = repr(exc)
     finally:
       trainer.close()
   wall_time_sec = time.perf_counter() - start_wall
@@ -1178,6 +1228,7 @@ def run_variant(
           "tunix_accel_version": package_version("tunix-accel"),
       },
       "accel": collect_accel_status(),
+      "lora_fa": lora_fa_metrics,
       "packing": prepared.packing_summary,
       "quality": quality,
   }
@@ -1429,6 +1480,7 @@ def main() -> None:
   parser.add_argument("--generation-batch-size", type=int, default=8)
   parser.add_argument("--max-generation-steps", type=int, default=128)
   parser.add_argument("--save-checkpoints", action="store_true")
+  parser.add_argument("--capture-lora-value-deltas", action="store_true")
   parser.add_argument("--log-every", type=int, default=1)
   parser.add_argument("--seed", type=int, default=0)
   parser.add_argument("--outdir", default="02-PACKING/results/gemma-training-default-ce")

@@ -1,0 +1,3 @@
+variant,step,loss,step_time_sec,grad_norm,valid_tokens,loss_tokens,capacity_tokens,valid_ratio,loss_ratio,cumulative_valid_tokens,cumulative_loss_tokens,cumulative_step_time_sec
+unpacked,1,2.554593563079834,83.11218669499976,51.5,38,12,512,0.07421875,0.0234375,38,12,83.11218669499976
+unpacked,2,1.5799779891967773,0.240736871000081,26.125,62,25,512,0.12109375,0.048828125,100,37,83.35292356599984
