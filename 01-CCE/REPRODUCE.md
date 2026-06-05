@@ -13,6 +13,7 @@ Main report and figures:
 - `01-CCE/assets/gemma3_270m_cce_status_heatmap.png`
 - `01-CCE/assets/gemma3_270m_cce_tuning.png`
 - `01-CCE/assets/gemma3_270m_cce_quality.png`
+- `01-CCE/assets/gemma3_270m_cce_mesh_generalization.png`
 
 Compact rerun data:
 
@@ -30,13 +31,19 @@ Compact rerun data:
 - `01-CCE/data/gemma3_270m_full_cce/generation_samples.jsonl`
 - `01-CCE/data/gemma3_270m_full_cce/profile_summary.csv`
 - `01-CCE/data/gemma3_270m_full_cce/oom_events.csv`
+- `01-CCE/data/gemma3_270m_mesh_cce/run_manifest.csv`
+- `01-CCE/data/gemma3_270m_mesh_cce/mesh_runs.csv`
+- `01-CCE/data/gemma3_270m_mesh_cce/mesh_summary.csv`
+- `01-CCE/data/gemma3_270m_mesh_cce/matched_memory.csv`
 
 Compressed raw worker outputs:
 
 - `01-CCE/data/gemma3_270m_full_cce/raw_artifacts/*.tar.gz`
+- `01-CCE/data/gemma3_270m_mesh_cce/raw_artifacts/*.tar.gz`
 
 Do not commit the extracted `01-CCE/data/gemma3_270m_full_cce/raw/` directory.
-It is recreated by the collector script from the tarballs.
+Do not commit the extracted `01-CCE/data/gemma3_270m_mesh_cce/raw/` directory
+either. They are recreated by the collector scripts from the tarballs.
 
 ## Local Patch Install
 
@@ -72,7 +79,7 @@ export TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION=0
 
 ## TPU Setup
 
-All rerun artifacts were produced on:
+The primary rerun artifacts were produced on:
 
 | Field | Value |
 | --- | --- |
@@ -84,6 +91,9 @@ All rerun artifacts were produced on:
 | Model | `google/gemma-3-270m-it` |
 | Model checkpoint | `gs://gemma-data/checkpoints/gemma3-270m-it` |
 | Tokenizer | `gs://gemma-data/tokenizers/tokenizer_gemma3.model` |
+
+The mesh generalization check used the same project, zone, model, checkpoint,
+tokenizer, and image, but ran on Cloud TPU `v5litepod-4` with four chips.
 
 Create one TPU VM per independent profile when you want maximum parallelism:
 
@@ -138,6 +148,9 @@ The final rerun used these worker profiles:
 | `quality-default` | OPUS100 EN-FR Default CE b16/L512 for 5,000 steps |
 | `quality-cce` | OPUS100 EN-FR CCE b16/L512 for 5,000 steps |
 | `quality-capacity` | OPUS100 EN-FR CCE b64/L512 for 1,250 steps |
+| `mesh-fsdp4` | v5litepod-4 synthetic mesh check with `fsdp=4,tp=1` |
+| `mesh-2x2` | v5litepod-4 synthetic mesh check with `fsdp=2,tp=2` |
+| `mesh-tp4` | v5litepod-4 synthetic mesh check with `fsdp=1,tp=4` |
 
 Example parallel schedule:
 
@@ -152,12 +165,21 @@ bash 01-CCE/remote_gemma3_270m_cce_worker.sh quality-cce
 bash 01-CCE/remote_gemma3_270m_cce_worker.sh quality-capacity
 ```
 
+Run the mesh profiles on `v5litepod-4` workers:
+
+```bash
+bash 01-CCE/remote_gemma3_270m_cce_worker.sh mesh-fsdp4
+bash 01-CCE/remote_gemma3_270m_cce_worker.sh mesh-2x2
+bash 01-CCE/remote_gemma3_270m_cce_worker.sh mesh-tp4
+```
+
 ## Local Aggregation
 
 After all tarballs are copied into `raw_artifacts/`, run:
 
 ```bash
 python3 01-CCE/collect_gemma3_270m_cce_results.py
+python3 01-CCE/collect_gemma3_270m_mesh_results.py
 ```
 
 The collector:
@@ -171,6 +193,7 @@ committing:
 
 ```bash
 rm -rf 01-CCE/data/gemma3_270m_full_cce/raw
+rm -rf 01-CCE/data/gemma3_270m_mesh_cce/raw
 ```
 
 ## Expected Checks
@@ -184,6 +207,9 @@ The rerun should reproduce the following qualitative findings:
 - b64/L512: Default CE compile OOMs; CCE completes at about 14.13 GiB/chip.
 - OPUS100 b16/L512 5,000-step training keeps train/eval loss in the same band,
   while same-shape CCE steps are slower.
+- On `v5litepod-4`, CCE works across `fsdp=4,tp=1`, `fsdp=2,tp=2`, and
+  `fsdp=1,tp=4`; matched passing rows show about 53-66% per-chip XLA planned
+  HBM reduction.
 
 Generation note: the CCE LoRA training hook intercepts hidden states in the
 loss path. Before sampling, call the restore path so Tunix generation sees the

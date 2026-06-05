@@ -1,0 +1,4 @@
+artifact,bytes,profile,tpu,chips,project,zone,model
+data/gemma3_270m_mesh_cce/raw_artifacts/gemma3-270m-cce-mesh-mesh-2x2.tar.gz,1285399,gemma3-270m-cce-mesh-mesh-2x2,v5litepod-4,4,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
+data/gemma3_270m_mesh_cce/raw_artifacts/gemma3-270m-cce-mesh-mesh-fsdp4.tar.gz,978877,gemma3-270m-cce-mesh-mesh-fsdp4,v5litepod-4,4,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
+data/gemma3_270m_mesh_cce/raw_artifacts/gemma3-270m-cce-mesh-mesh-tp4.tar.gz,1885459,gemma3-270m-cce-mesh-mesh-tp4,v5litepod-4,4,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it

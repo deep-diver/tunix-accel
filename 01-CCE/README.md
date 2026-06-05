@@ -13,6 +13,7 @@ larger-model transfer checks are considered.
 - `run_gemma3_270m_cce_sweep.py`: local/TPU sweep runner used by the rerun.
 - `remote_gemma3_270m_cce_worker.sh`: TPU VM profile wrapper.
 - `collect_gemma3_270m_cce_results.py`: artifact collector and plot generator.
+- `collect_gemma3_270m_mesh_results.py`: four-chip mesh compatibility collector.
 - `assets/`: final plots used by the report.
 - `data/`: compact CSV/JSONL summaries retained from the experiments,
   including the Gemma4 base boundary rows.
@@ -34,14 +35,25 @@ The current primary evidence package is:
   - `assets/gemma3_270m_cce_status_heatmap.png`
   - `assets/gemma3_270m_cce_tuning.png`
   - `assets/gemma3_270m_cce_quality.png`
+  - `assets/gemma3_270m_cce_mesh_generalization.png`
 
-All rows used Cloud TPU `v5litepod-1`, one chip, in `us-west4-a`.
+The primary rerun rows used Cloud TPU `v5litepod-1`, one chip, in
+`us-west4-a`. The mesh generalization check used `v5litepod-4`, four chips, in
+the same zone, with `fsdp=4,tp=1`, `fsdp=2,tp=2`, and `fsdp=1,tp=4`.
+
+Mesh check data:
+
+- `data/gemma3_270m_mesh_cce/run_manifest.csv`
+- `data/gemma3_270m_mesh_cce/mesh_runs.csv`
+- `data/gemma3_270m_mesh_cce/mesh_summary.csv`
+- `data/gemma3_270m_mesh_cce/matched_memory.csv`
 
 The extracted `data/gemma3_270m_full_cce/raw/` directory is disposable and
 should not be committed. Recreate it from `raw_artifacts/*.tar.gz` with:
 
 ```bash
 python3 01-CCE/collect_gemma3_270m_cce_results.py
+python3 01-CCE/collect_gemma3_270m_mesh_results.py
 ```
 
 ## Gemma4 Rows

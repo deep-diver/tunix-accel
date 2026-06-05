@@ -3,13 +3,17 @@
 ## Execution Status
 
 This design has been executed on Cloud TPU `v5litepod-1`, one chip, in
-`us-west4-a`. The retained results live under:
+`us-west4-a`. A follow-up mesh generalization check has also been executed on
+Cloud TPU `v5litepod-4`, four chips, in the same zone. The retained results live
+under:
 
 - `01-CCE/data/gemma3_270m_full_cce/`
+- `01-CCE/data/gemma3_270m_mesh_cce/`
 - `01-CCE/assets/gemma3_270m_cce_frontier.png`
 - `01-CCE/assets/gemma3_270m_cce_status_heatmap.png`
 - `01-CCE/assets/gemma3_270m_cce_tuning.png`
 - `01-CCE/assets/gemma3_270m_cce_quality.png`
+- `01-CCE/assets/gemma3_270m_cce_mesh_generalization.png`
 
 The final narrative is `01-CCE/TECHNICAL_REPORT.md`, and reproduction steps are
 in `01-CCE/REPRODUCE.md`.
@@ -42,6 +46,7 @@ The 270M run family should answer this before we scale out:
 | Training mode | Tunix PEFT/LoRA |
 | Primary LoRA rank | 16 |
 | TPU | Cloud TPU v5e `v5litepod-1`, 1 chip |
+| Mesh follow-up TPU | Cloud TPU v5e `v5litepod-4`, 4 chips |
 | Main dataset for systems sweeps | deterministic synthetic SFT records |
 | Main dataset for quality | OPUS100 EN-FR |
 | Compared variants | Default CE vs CCE only |
@@ -217,7 +222,38 @@ For each representative row, collect:
 - top buffer classes or largest buffers,
 - same shape Default/CCE comparison when both compile.
 
-## 9. Experiment Suite F: Real EN-FR Training Parity
+## 9. Experiment Suite F: Multi-Chip Mesh Generalization
+
+Purpose: verify that CCE is not only valid on one-chip runs. This suite should
+stay synthetic and short; it is a compatibility and frontier check, not another
+quality run.
+
+Executed grid:
+
+| Axis | Values |
+| --- | --- |
+| TPU | `v5litepod-4`, 4 chips |
+| Meshes | `fsdp=4,tp=1`, `fsdp=2,tp=2`, `fsdp=1,tp=4` |
+| Batch size | `16, 32, 64` |
+| Context length | `512, 1024, 2048` |
+| Variant | Default CE, CCE |
+| LoRA rank | 16 |
+| Steps | 3 timed synthetic SFT steps for passing rows |
+
+Required interpretation:
+
+- CCE should compile and run under FSDP-only, mixed FSDP/TP, and TP-only meshes.
+- Report max per-chip XLA planned HBM, not only aggregate accounting.
+- Treat TP-heavy timing as a separate throughput caveat, because mesh choice can
+  dominate the step-time result for a small model.
+
+Required output:
+
+- frontier by mesh/batch,
+- matched passing shape memory reduction,
+- a short timing caveat table or paragraph.
+
+## 10. Experiment Suite G: Real EN-FR Training Parity
 
 Purpose: verify that the systems win does not come from changing training
 behavior.
@@ -262,7 +298,7 @@ Capacity-enabled CCE run:
 This row should answer: "If CCE enables a larger feasible batch/context, can
 that capacity offset the slower same-shape step?"
 
-## 10. Experiment Suite G: Profiler Attribution
+## 11. Experiment Suite H: Profiler Attribution
 
 Purpose: make the report credible to readers who ask whether memory was saved
 in the intended place.
@@ -289,7 +325,7 @@ Required plot:
 - top-buffer comparison for Default CE vs CCE at one matched passing shape,
 - step-time vs memory scatter for representative rows.
 
-## 11. Transfer Checks After 270M Is Complete
+## 12. Transfer Checks After 270M Is Complete
 
 Only after the 270M report is internally complete, run reduced transfer checks:
 
@@ -303,7 +339,7 @@ Only after the 270M report is internally complete, run reduced transfer checks:
 Transfer rows should answer "does the 270M pattern transfer?" They should not
 define the main message.
 
-## 12. Report Redesign
+## 13. Report Redesign
 
 The final 01-CCE report should be rebuilt around this order:
 
@@ -311,9 +347,10 @@ The final 01-CCE report should be rebuilt around this order:
 2. exactness/parity,
 3. Gemma3 270M frontier sweep,
 4. 270M pressure points and profiler attribution,
-5. 270M real EN-FR training parity,
-6. transfer checks to larger Gemma3 and Gemma4,
-7. tradeoffs and limits.
+5. 270M multi-chip mesh generalization,
+6. 270M real EN-FR training parity,
+7. transfer checks to larger Gemma3 and Gemma4,
+8. tradeoffs and limits.
 
 The hero figure should be the 270M frontier. Larger model rows should appear
 only after the reader already understands the 270M result.

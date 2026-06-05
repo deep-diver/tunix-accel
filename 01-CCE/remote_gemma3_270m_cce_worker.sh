@@ -44,6 +44,28 @@ run_sweep() {
   python 01-CCE/run_gemma3_270m_cce_sweep.py "$@"
 }
 
+run_mesh_sweep() {
+  local suite="$1"
+  local fsdp="$2"
+  local tp="$3"
+  run_sweep \
+    --suite "${suite}" \
+    --variants default,cce \
+    --batch-sizes 16,32,64 \
+    --contexts 512,1024,2048 \
+    --lora-ranks 16 \
+    --dataset-mode synthetic \
+    --num-examples 2048 \
+    --max-steps 3 \
+    --skip-quality-eval \
+    --mesh-fsdp "${fsdp}" \
+    --mesh-tp "${tp}" \
+    --tpu v5litepod-4 \
+    --chips 4 \
+    --force \
+    --outdir "${OUT_BASE}/${suite}"
+}
+
 case "${PROFILE}" in
   parity)
     python -m pytest -q \
@@ -192,6 +214,18 @@ case "${PROFILE}" in
       --generation-batch-size 8 \
       --force \
       --outdir "${OUT_BASE}/quality_cce_capacity_b64_l512"
+    ;;
+
+  mesh-fsdp4)
+    run_mesh_sweep mesh_fsdp4_tp1 4 1
+    ;;
+
+  mesh-2x2)
+    run_mesh_sweep mesh_fsdp2_tp2 2 2
+    ;;
+
+  mesh-tp4)
+    run_mesh_sweep mesh_fsdp1_tp4 1 4
     ;;
 
   *)

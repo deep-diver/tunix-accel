@@ -14,7 +14,8 @@ memory wall without materially changing the training result.
 | Does it reduce memory at matched passing shapes? | Yes. Rank-sensitive matched rows show about 43-68% XLA planned HBM reduction. The OPUS100 b16/L512 run dropped from 12.57 GiB/chip to 4.98 GiB/chip. |
 | Does real training still behave normally? | Yes. OPUS100 EN-FR b16/L512 LoRA SFT produced final train loss 0.1731 vs 0.1766 and eval loss 3.4292 vs 3.4251 for Default CE vs CCE. |
 | What is the tradeoff? | Same-shape training is slower. In the 5,000-step b16/L512 run, mean step time rose from 0.106s to 0.196s. |
-| What TPU was used? | All 270M rerun rows used Cloud TPU `v5litepod-1`, one chip, in `us-west4-a`. |
+| Does it survive multi-chip mesh layouts? | Yes. A follow-up on `v5litepod-4` tested `fsdp=4,tp=1`, `fsdp=2,tp=2`, and `fsdp=1,tp=4`; matched passing rows showed 53-66% per-chip XLA planned HBM reduction. |
+| What TPU was used? | The primary 270M rerun used Cloud TPU `v5litepod-1`, one chip, in `us-west4-a`. The mesh generalization check used `v5litepod-4`, four chips, in the same zone. |
 
 The memory metric used throughout the new 270M plots is **max per-chip XLA
 buffer-assignment planned HBM**. This is the number that decides whether a TPU
@@ -138,7 +139,49 @@ The default package knobs remain conservative (`128`, `8192`) because they are
 stable across shapes. The sweep suggests that larger token chunks may be faster
 for this particular 270M b16/L512 case, but chunk tuning should be shape-aware.
 
-## 4. Real EN-FR Training Parity
+## 4. Multi-Chip Mesh Generalization
+
+The main rerun is intentionally single-chip so that the memory story is easy to
+read. We then checked whether the patch still works when Tunix/JAX shards the
+same Gemma3 270M LoRA job over four TPU chips.
+
+| Field | Value |
+| --- | --- |
+| TPU | Cloud TPU `v5litepod-4`, 4 chips |
+| Zone | `us-west4-a` |
+| Meshes | `fsdp=4,tp=1`, `fsdp=2,tp=2`, `fsdp=1,tp=4` |
+| Grid | batches 16/32/64, contexts 512/1024/2048 |
+| Steps | 3 timed synthetic SFT steps for passing rows |
+| Other acceleration patches | disabled |
+
+![Gemma3 270M CCE mesh generalization](./assets/gemma3_270m_cce_mesh_generalization.png)
+
+The result is not a single-chip artifact. CCE worked in the FSDP-only,
+mixed-FSDP/TP, and TP-only layouts. At shapes where both variants completed,
+CCE reduced max per-chip XLA planned HBM by 53-66%.
+
+The frontier also moved in each mesh:
+
+| Mesh | Batch | Default CE max context | CCE max context |
+| --- | ---: | ---: | ---: |
+| `fsdp=4,tp=1` | 16 | 512 | 1024 |
+| `fsdp=4,tp=1` | 32 | none | 1024 |
+| `fsdp=4,tp=1` | 64 | none | 512 |
+| `fsdp=2,tp=2` | 16 | 1024 | 2048 |
+| `fsdp=2,tp=2` | 64 | none | 512 |
+| `fsdp=1,tp=4` | 32 | 1024 | 2048 |
+| `fsdp=1,tp=4` | 64 | 512 | 1024 |
+
+The tradeoff is mesh-dependent. FSDP-only timing looked similar to the
+single-chip story: at b16/L512, step time moved from 0.238s to 0.413s. TP-heavy
+layouts were much slower in this small-model synthetic check; for example,
+`fsdp=1,tp=4` b32/L1024 moved from 22.8s to 30.7s, and `fsdp=2,tp=2` CCE rows
+were slower still. The clean interpretation is therefore: CCE is compatible
+with FSDP/TP sharding and still reduces per-chip memory, but mesh choice can
+dominate throughput. For Gemma3 270M, TP is useful as a compatibility stress
+test, not as the fastest training layout.
+
+## 5. Real EN-FR Training Parity
 
 The systems sweeps prove memory behavior, not usefulness. For a training sanity
 check, we ran OPUS100 EN-FR LoRA SFT.
@@ -174,7 +217,7 @@ token budget of b16/L512 for 5,000 steps. It fit at 14.13 GiB/chip and finished
 in 19.2 minutes. That row did not create a speed win in this setup; it mainly
 shows that CCE can spend the saved memory on a much larger batch.
 
-## 5. Generation Samples
+## 6. Generation Samples
 
 The restored generation path produced normal text for both variants. The
 outputs below are not polished translation results; the point is that CCE and
@@ -191,7 +234,7 @@ Default CE are in the same qualitative band after the same training recipe.
 The complete 32-row side-by-side sample file is retained as
 `01-CCE/data/gemma3_270m_full_cce/generation_samples.jsonl`.
 
-## 6. Interpretation
+## 7. Interpretation
 
 CCE is a strong memory lever when the loss logits are a dominant tensor. That is
 why the effect becomes clearer as batch and context grow. It is not a universal
@@ -205,7 +248,12 @@ quality run, the slowdown was about 1.85x. The value of CCE is therefore not
 "always faster." The value is "more trainable shapes before OOM," and sometimes
 that extra capacity may be worth the slower step.
 
-## 7. Reproducibility Artifacts
+The mesh check adds one more caveat: memory savings transfer across FSDP/TP
+layouts, but throughput does not transfer automatically. TP-heavy layouts can
+make a small model communication-bound, so the right comparison is always
+same-model, same-mesh, Default CE versus CCE.
+
+## 8. Reproducibility Artifacts
 
 Compact data retained from this rerun:
 
@@ -223,7 +271,12 @@ Compact data retained from this rerun:
 - `01-CCE/data/gemma3_270m_full_cce/generation_samples.jsonl`
 - `01-CCE/data/gemma3_270m_full_cce/profile_summary.csv`
 - `01-CCE/data/gemma3_270m_full_cce/oom_events.csv`
+- `01-CCE/data/gemma3_270m_mesh_cce/run_manifest.csv`
+- `01-CCE/data/gemma3_270m_mesh_cce/mesh_runs.csv`
+- `01-CCE/data/gemma3_270m_mesh_cce/mesh_summary.csv`
+- `01-CCE/data/gemma3_270m_mesh_cce/matched_memory.csv`
 
 Compressed raw worker artifacts are retained under
-`01-CCE/data/gemma3_270m_full_cce/raw_artifacts/`. The extracted `raw/`
-directory is reproducible from those tarballs and should not be committed.
+`01-CCE/data/gemma3_270m_full_cce/raw_artifacts/` and
+`01-CCE/data/gemma3_270m_mesh_cce/raw_artifacts/`. The extracted `raw/`
+directories are reproducible from those tarballs and should not be committed.

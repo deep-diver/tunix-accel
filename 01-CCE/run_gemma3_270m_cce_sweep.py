@@ -219,9 +219,9 @@ def command_for_case(
       "--lora-alpha",
       str(args.lora_alpha),
       "--mesh-fsdp",
-      "1",
+      str(args.mesh_fsdp),
       "--mesh-tp",
-      "1",
+      str(args.mesh_tp),
       "--max-inflight",
       str(args.max_inflight),
       "--log-every",
@@ -320,10 +320,10 @@ def run_case(
       "case": case_name,
       "model": "Gemma3 270M",
       "model_id": MODEL_ID,
-      "tpu": "v5litepod-1",
-      "chips": 1,
-      "mesh_fsdp": 1,
-      "mesh_tp": 1,
+      "tpu": args.tpu,
+      "chips": args.chips,
+      "mesh_fsdp": args.mesh_fsdp,
+      "mesh_tp": args.mesh_tp,
       "variant": variant,
       "batch_size": batch_size,
       "max_length": max_length,
@@ -473,6 +473,10 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--learning-rate", type=float, default=2e-4)
   parser.add_argument("--lora-alpha", type=float, default=32.0)
   parser.add_argument("--max-inflight", type=int, default=1)
+  parser.add_argument("--mesh-fsdp", type=int, default=1)
+  parser.add_argument("--mesh-tp", type=int, default=1)
+  parser.add_argument("--tpu", default="v5litepod-1")
+  parser.add_argument("--chips", type=int, default=1)
   parser.add_argument("--log-every", type=int, default=1)
   parser.add_argument("--seed", type=int, default=0)
   parser.add_argument("--skip-quality-eval", action="store_true")
@@ -490,6 +494,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
   args = parse_args()
+  if args.mesh_fsdp * args.mesh_tp != args.chips:
+    raise ValueError(
+        "mesh_fsdp * mesh_tp must equal chips for metadata and runner "
+        f"consistency. Got {args.mesh_fsdp} * {args.mesh_tp} != {args.chips}."
+    )
   args.outdir = args.outdir.expanduser().resolve()
   args.outdir.mkdir(parents=True, exist_ok=True)
   rows: list[dict[str, Any]] = []
@@ -500,8 +509,10 @@ def main() -> None:
           "suite": case["suite"],
           "model": "Gemma3 270M",
           "model_id": MODEL_ID,
-          "tpu": "v5litepod-1",
-          "chips": 1,
+          "tpu": args.tpu,
+          "chips": args.chips,
+          "mesh_fsdp": args.mesh_fsdp,
+          "mesh_tp": args.mesh_tp,
           "variant": case["variant"],
           "batch_size": case["batch_size"],
           "max_length": case["max_length"],
@@ -535,4 +546,3 @@ def main() -> None:
 
 if __name__ == "__main__":
   main()
-
