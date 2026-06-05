@@ -53,7 +53,7 @@ def configure_autopatch_env(args: argparse.Namespace) -> None:
     )
 
   os.environ.setdefault("TUNIX_ACCEL_DISABLE_AUTOPATCH", "")
-  os.environ.setdefault("TUNIX_ACCEL_DISABLE_CE", "1")
+  os.environ.setdefault("TUNIX_ACCEL_DISABLE_CE", "true")
   os.environ.setdefault(
       "TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK",
       str(args.tiled_mlp_token_chunk),
@@ -63,7 +63,7 @@ def configure_autopatch_env(args: argparse.Namespace) -> None:
       str(args.lora_alpha),
   )
   if args.mlp_variant == "default":
-    os.environ["TUNIX_ACCEL_DISABLE_TILED_MLP"] = "1"
+    os.environ["TUNIX_ACCEL_DISABLE_TILED_MLP"] = "true"
   else:
     os.environ.pop("TUNIX_ACCEL_DISABLE_TILED_MLP", None)
 

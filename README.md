@@ -44,12 +44,16 @@ site-packages so the drop-in patches still load there.
 ```bash
 export TUNIX_ACCEL_CE_TOKEN_CHUNK=128
 export TUNIX_ACCEL_CE_VOCAB_CHUNK=8192
-export TUNIX_ACCEL_DISABLE_CE=1
-export TUNIX_ACCEL_DISABLE_AUTOPATCH=1
+export TUNIX_ACCEL_DISABLE_CE=true
+export TUNIX_ACCEL_DISABLE_AUTOPATCH=true
 ```
 
-Use `TUNIX_ACCEL_DISABLE_CE=1` for a Default CE baseline while keeping other
-autopatches available. Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` to disable all
+Boolean environment values are case-insensitive. The parser accepts
+`true/false`, `1/0`, `yes/no`, and `on/off`; examples use `true/false` for
+readability.
+
+Use `TUNIX_ACCEL_DISABLE_CE=true` for a Default CE baseline while keeping other
+autopatches available. Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=true` to disable all
 automatic patches.
 
 ## Tiled MLP Controls
@@ -59,13 +63,13 @@ By default, installed environments automatically patch Tunix Gemma3 and Gemma4
 
 ```bash
 export TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK=128
-export TUNIX_ACCEL_TILED_MLP_FALLBACK_ON_LORA=1
+export TUNIX_ACCEL_TILED_MLP_FALLBACK_ON_LORA=true
 export TUNIX_ACCEL_TILED_MLP_LORA_ALPHA=32.0
-export TUNIX_ACCEL_DISABLE_TILED_MLP=1
+export TUNIX_ACCEL_DISABLE_TILED_MLP=true
 ```
 
-Use `TUNIX_ACCEL_DISABLE_TILED_MLP=1` for a Default MLP baseline while keeping
-other autopatches available. Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` to disable
+Use `TUNIX_ACCEL_DISABLE_TILED_MLP=true` for a Default MLP baseline while keeping
+other autopatches available. Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=true` to disable
 all automatic patches.
 
 ## Activation Policy Controls
@@ -75,14 +79,14 @@ Tunix Gemma3 and Gemma4 decoder layers unchanged.
 
 ```bash
 export TUNIX_ACCEL_ACTIVATION_POLICY=split_offload
-export TUNIX_ACCEL_ACTIVATION_PREVENT_CSE=0
+export TUNIX_ACCEL_ACTIVATION_PREVENT_CSE=false
 export TUNIX_ACCEL_ACTIVATION_OFFLOAD_SRC=device
 export TUNIX_ACCEL_ACTIVATION_OFFLOAD_DST=pinned_host
-export TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY=1
+export TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY=true
 ```
 
 Use `TUNIX_ACCEL_ACTIVATION_POLICY=none` or leave it unset for the baseline.
-Use `TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY=1` to disable only this patch while
+Use `TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY=true` to disable only this patch while
 keeping other autopatches available.
 
 ## Gemma3 Splash Attention Controls
@@ -90,8 +94,8 @@ keeping other autopatches available.
 Splash Attention is optional and Gemma3-specific.
 
 ```bash
-export TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION=1
-export TUNIX_ACCEL_SPLASH_ATTENTION_INTERPRET=0
+export TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION=true
+export TUNIX_ACCEL_SPLASH_ATTENTION_INTERPRET=false
 ```
 
 Leave `TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION` unset for the baseline. The current

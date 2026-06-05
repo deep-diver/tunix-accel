@@ -13,8 +13,8 @@ import sys
 from typing import Any
 
 
-os.environ.setdefault("TUNIX_ACCEL_DISABLE_AUTOPATCH", "1")
-os.environ.setdefault("TUNIX_ACCEL_DISABLE_CE", "1")
+os.environ.setdefault("TUNIX_ACCEL_DISABLE_AUTOPATCH", "true")
+os.environ.setdefault("TUNIX_ACCEL_DISABLE_CE", "true")
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
@@ -157,8 +157,8 @@ def main() -> None:
       "on",
   }:
     raise RuntimeError(
-        "Launch with TUNIX_ACCEL_DISABLE_AUTOPATCH=1 so the baseline block stays "
-        "unpatched until this script installs the tiled path explicitly."
+        "Launch with TUNIX_ACCEL_DISABLE_AUTOPATCH=true so the baseline block "
+        "stays unpatched until this script installs the tiled path explicitly."
     )
 
   import jax

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Actual Tunix/Gemma training benchmark for sequence packing.
 
-Set TUNIX_ACCEL_DISABLE_AUTOPATCH=1 before launching Python so this benchmark
+Set TUNIX_ACCEL_DISABLE_AUTOPATCH=true before launching Python so this benchmark
 stays focused on sequence packing and does not pick up repository-level
 autopatches at interpreter startup.
 """
@@ -23,7 +23,7 @@ import sys
 import time
 from typing import Any, Iterable, Iterator
 
-os.environ.setdefault("TUNIX_ACCEL_DISABLE_AUTOPATCH", "1")
+os.environ.setdefault("TUNIX_ACCEL_DISABLE_AUTOPATCH", "true")
 
 import numpy as np
 
@@ -114,7 +114,7 @@ def configure_autopatch(*, allow_autopatch: bool) -> None:
   if not disabled:
     raise RuntimeError(
         "This benchmark should run with repository autopatches disabled. Launch "
-        "with TUNIX_ACCEL_DISABLE_AUTOPATCH=1, or pass --allow-autopatch for "
+        "with TUNIX_ACCEL_DISABLE_AUTOPATCH=true, or pass --allow-autopatch for "
         "explicit patch-comparison runs."
     )
 

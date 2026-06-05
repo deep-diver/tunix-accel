@@ -51,11 +51,15 @@ Useful environment knobs:
 ```bash
 export TUNIX_ACCEL_CE_TOKEN_CHUNK=128
 export TUNIX_ACCEL_CE_VOCAB_CHUNK=8192
-export TUNIX_ACCEL_DISABLE_AUTOPATCH=1
+export TUNIX_ACCEL_DISABLE_AUTOPATCH=true
 ```
 
-Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` for the Default CE baseline. Leave it unset
-for the CCE run, or explicitly install the patch:
+Boolean environment values are case-insensitive. The parser accepts
+`true/false`, `1/0`, `yes/no`, and `on/off`; examples use `true/false` for
+readability.
+
+Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=true` for the Default CE baseline. Leave it
+unset for the CCE run, or explicitly install the patch:
 
 ```python
 from tunix_accel.tunix_patch import install
@@ -140,7 +144,7 @@ Sweep grid:
 
 For each `(model, batch, context)` pair:
 
-1. Run baseline with `TUNIX_ACCEL_DISABLE_AUTOPATCH=1`.
+1. Run baseline with `TUNIX_ACCEL_DISABLE_AUTOPATCH=true`.
 2. Run CCE with autopatch enabled and `TUNIX_ACCEL_CE_TOKEN_CHUNK=256`,
    `TUNIX_ACCEL_CE_VOCAB_CHUNK=32768`.
 3. Record status as `ok`, `oom`, or `skipped`.
@@ -262,7 +266,7 @@ Common settings:
 
 Run two jobs:
 
-1. Default CE baseline with `TUNIX_ACCEL_DISABLE_AUTOPATCH=1`.
+1. Default CE baseline with `TUNIX_ACCEL_DISABLE_AUTOPATCH=true`.
 2. Cut Cross Entropy with autopatch enabled.
 
 Save only final metrics, final generated predictions, and summary CSV/JSONL.

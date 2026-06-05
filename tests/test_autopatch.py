@@ -34,6 +34,24 @@ def _run_python(code: str, *, env: dict[str, str] | None = None) -> str:
   return result.stdout.strip()
 
 
+def test_env_booleans_are_case_insensitive(monkeypatch) -> None:
+  sys.path.insert(0, str(REPO_ROOT))
+
+  from tunix_accel import autopatch
+
+  monkeypatch.setenv("TUNIX_ACCEL_DISABLE_AUTOPATCH", "TrUe")
+  assert not autopatch._env_enabled()
+
+  monkeypatch.setenv("TUNIX_ACCEL_DISABLE_AUTOPATCH", "FaLsE")
+  assert autopatch._env_enabled()
+
+  monkeypatch.setenv("TUNIX_ACCEL_DISABLE_CE", "YeS")
+  assert autopatch._env_bool("TUNIX_ACCEL_DISABLE_CE", default=False)
+
+  monkeypatch.setenv("TUNIX_ACCEL_DISABLE_CE", "oFf")
+  assert not autopatch._env_bool("TUNIX_ACCEL_DISABLE_CE", default=True)
+
+
 def test_gemma3_tiled_mlp_autopatch_installs_on_import() -> None:
   output = _run_python(
       """

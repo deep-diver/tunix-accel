@@ -74,13 +74,17 @@ corresponding Tunix model module is imported.
 ```bash
 export TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK=128
 export TUNIX_ACCEL_TILED_MLP_LORA_ALPHA=32.0
-export TUNIX_ACCEL_DISABLE_TILED_MLP=1
-export TUNIX_ACCEL_DISABLE_CE=1
+export TUNIX_ACCEL_DISABLE_TILED_MLP=true
+export TUNIX_ACCEL_DISABLE_CE=true
 ```
 
-Use `TUNIX_ACCEL_DISABLE_TILED_MLP=1` for the Default MLP baseline while keeping
-other autopatches available. Use `TUNIX_ACCEL_DISABLE_CE=1` when isolating MLP
-experiments from the Cut Cross Entropy patch.
+Boolean environment values are case-insensitive. The parser accepts
+`true/false`, `1/0`, `yes/no`, and `on/off`; examples use `true/false` for
+readability.
+
+Use `TUNIX_ACCEL_DISABLE_TILED_MLP=true` for the Default MLP baseline while
+keeping other autopatches available. Use `TUNIX_ACCEL_DISABLE_CE=true` when
+isolating MLP experiments from the Cut Cross Entropy patch.
 
 For notebooks or scoped tests:
 

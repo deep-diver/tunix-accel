@@ -182,8 +182,12 @@ python -m pip install -e .
 Use the repository-level disable flag for isolated packing runs:
 
 ```bash
-export TUNIX_ACCEL_DISABLE_AUTOPATCH=1
+export TUNIX_ACCEL_DISABLE_AUTOPATCH=true
 ```
+
+Boolean environment values are case-insensitive. The parser accepts
+`true/false`, `1/0`, `yes/no`, and `on/off`; examples use `true/false` for
+readability.
 
 ## 7. Reproduce the 270M Training Smoke
 
@@ -204,7 +208,7 @@ Common settings:
 Run:
 
 ```bash
-TUNIX_ACCEL_DISABLE_AUTOPATCH=1 python 02-PACKING/run_gemma_training_benchmark.py \
+TUNIX_ACCEL_DISABLE_AUTOPATCH=true python 02-PACKING/run_gemma_training_benchmark.py \
   --model-id google/gemma-3-270m-it \
   --variants unpacked,packed \
   --num-examples 5000 \
@@ -226,7 +230,7 @@ used for a longer run.
 Run two jobs:
 
 ```bash
-TUNIX_ACCEL_DISABLE_AUTOPATCH=1 python 02-PACKING/run_gemma_training_benchmark.py \
+TUNIX_ACCEL_DISABLE_AUTOPATCH=true python 02-PACKING/run_gemma_training_benchmark.py \
   --model-id google/gemma-3-270m-it \
   --variants unpacked \
   --num-examples 5000 \
@@ -237,7 +241,7 @@ TUNIX_ACCEL_DISABLE_AUTOPATCH=1 python 02-PACKING/run_gemma_training_benchmark.p
 ```
 
 ```bash
-TUNIX_ACCEL_DISABLE_AUTOPATCH=1 python 02-PACKING/run_gemma_training_benchmark.py \
+TUNIX_ACCEL_DISABLE_AUTOPATCH=true python 02-PACKING/run_gemma_training_benchmark.py \
   --model-id google/gemma-3-270m-it \
   --variants packed \
   --num-examples 5000 \
@@ -283,7 +287,7 @@ models.
 1B:
 
 ```bash
-TUNIX_ACCEL_DISABLE_AUTOPATCH=1 python 02-PACKING/run_gemma_training_benchmark.py \
+TUNIX_ACCEL_DISABLE_AUTOPATCH=true python 02-PACKING/run_gemma_training_benchmark.py \
   --model-id google/gemma-3-1b-it \
   --model-path gs://gemma-data/checkpoints/gemma3-1b-it \
   --variants unpacked,packed \
@@ -300,7 +304,7 @@ TUNIX_ACCEL_DISABLE_AUTOPATCH=1 python 02-PACKING/run_gemma_training_benchmark.p
 4B:
 
 ```bash
-TUNIX_ACCEL_DISABLE_AUTOPATCH=1 python 02-PACKING/run_gemma_training_benchmark.py \
+TUNIX_ACCEL_DISABLE_AUTOPATCH=true python 02-PACKING/run_gemma_training_benchmark.py \
   --model-id google/gemma-3-4b-it \
   --model-path gs://gemma-data/checkpoints/gemma3-4b-it \
   --variants unpacked,packed \

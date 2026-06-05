@@ -69,7 +69,7 @@ Installed environments use the normal Tunix training code. The patch is toggled
 with environment variables:
 
 ```bash
-export TUNIX_ACCEL_DISABLE_TILED_MLP=1
+export TUNIX_ACCEL_DISABLE_TILED_MLP=true
 export TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK=128
 export TUNIX_ACCEL_TILED_MLP_LORA_ALPHA=32.0
 ```

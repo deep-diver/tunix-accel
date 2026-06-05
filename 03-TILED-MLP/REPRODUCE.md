@@ -55,13 +55,17 @@ Useful environment knobs:
 ```bash
 export TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK=128
 export TUNIX_ACCEL_TILED_MLP_LORA_ALPHA=32.0
-export TUNIX_ACCEL_DISABLE_TILED_MLP=1
-export TUNIX_ACCEL_DISABLE_CE=1
-export TUNIX_ACCEL_DISABLE_AUTOPATCH=1
+export TUNIX_ACCEL_DISABLE_TILED_MLP=true
+export TUNIX_ACCEL_DISABLE_CE=true
+export TUNIX_ACCEL_DISABLE_AUTOPATCH=true
 ```
 
-Use `TUNIX_ACCEL_DISABLE_TILED_MLP=1` for the Default MLP baseline. Use
-`TUNIX_ACCEL_DISABLE_CE=1` to isolate MLP experiments from the CCE patch.
+Boolean environment values are case-insensitive. The parser accepts
+`true/false`, `1/0`, `yes/no`, and `on/off`; examples use `true/false` for
+readability.
+
+Use `TUNIX_ACCEL_DISABLE_TILED_MLP=true` for the Default MLP baseline. Use
+`TUNIX_ACCEL_DISABLE_CE=true` to isolate MLP experiments from the CCE patch.
 
 ## 3. Local Verification Tests
 
@@ -122,8 +126,8 @@ Purpose: compare Default MLP and Tiled MLP on the same loaded model instance and
 same first batch.
 
 ```bash
-TUNIX_ACCEL_DISABLE_AUTOPATCH=1 \
-TUNIX_ACCEL_DISABLE_CE=1 \
+TUNIX_ACCEL_DISABLE_AUTOPATCH=true \
+TUNIX_ACCEL_DISABLE_CE=true \
 python 03-TILED-MLP/run_gemma3_tiled_mlp_parity.py \
   --model-size 4b \
   --batch-size 1 \
@@ -170,8 +174,8 @@ Common settings:
 Default MLP:
 
 ```bash
-TUNIX_ACCEL_DISABLE_CE=1 \
-TUNIX_ACCEL_DISABLE_TILED_MLP=1 \
+TUNIX_ACCEL_DISABLE_CE=true \
+TUNIX_ACCEL_DISABLE_TILED_MLP=true \
 python 03-TILED-MLP/run_gemma_training_benchmark.py \
   --model-size 4b \
   --mlp-variant default \
@@ -189,7 +193,7 @@ python 03-TILED-MLP/run_gemma_training_benchmark.py \
 Tiled MLP:
 
 ```bash
-TUNIX_ACCEL_DISABLE_CE=1 \
+TUNIX_ACCEL_DISABLE_CE=true \
 TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK=128 \
 python 03-TILED-MLP/run_gemma_training_benchmark.py \
   --model-size 4b \
@@ -269,8 +273,8 @@ rough loss band. This is not a completed translation-quality benchmark.
 Default MLP:
 
 ```bash
-TUNIX_ACCEL_DISABLE_CE=1 \
-TUNIX_ACCEL_DISABLE_TILED_MLP=1 \
+TUNIX_ACCEL_DISABLE_CE=true \
+TUNIX_ACCEL_DISABLE_TILED_MLP=true \
 python 03-TILED-MLP/run_gemma_training_benchmark.py \
   --model-size 4b \
   --mlp-variant default \
@@ -290,7 +294,7 @@ python 03-TILED-MLP/run_gemma_training_benchmark.py \
 Tiled MLP:
 
 ```bash
-TUNIX_ACCEL_DISABLE_CE=1 \
+TUNIX_ACCEL_DISABLE_CE=true \
 TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK=128 \
 python 03-TILED-MLP/run_gemma_training_benchmark.py \
   --model-size 4b \
