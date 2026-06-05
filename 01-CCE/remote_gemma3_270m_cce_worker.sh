@@ -11,11 +11,11 @@ if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
   python3 -m pip install --upgrade pip
   python3 -m pip install -r requirements.txt
   python3 -m pip install -U "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-  python3 -m pip install -e .
 fi
 
 export PYTHONUNBUFFERED=1
 export HF_HUB_ENABLE_HF_TRANSFER=0
+export PYTHONPATH="${ROOT}:${PYTHONPATH:-}"
 
 run_sweep() {
   python3 01-CCE/run_gemma3_270m_cce_sweep.py "$@"
@@ -179,4 +179,3 @@ esac
 
 tar -C "$(dirname "${OUT_BASE}")" -czf "${OUT_BASE}-${PROFILE}.tar.gz" "$(basename "${OUT_BASE}")"
 echo "artifact=${OUT_BASE}-${PROFILE}.tar.gz"
-
