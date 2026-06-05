@@ -29,7 +29,8 @@ python -m pip install .
 
 When installed, the package registers a small `sitecustomize.py` hook. It waits
 for supported Tunix modules to be imported, then applies process-local patches:
-Cut Cross Entropy for Tunix SFT loss, Gemma3/Gemma4 tiled MLP replacement,
+Cut Cross Entropy for Tunix SFT loss, the optional packing argument on Tunix
+`PeftTrainer.with_gen_model_input_fn`, Gemma3/Gemma4 tiled MLP replacement,
 optional Gemma3 Splash Attention, and optional Gemma3/Gemma4 activation
 remat/offload policies. Future patches can live under the same package without
 renaming the project.
@@ -170,6 +171,31 @@ gemma4_activation_policy.install(policy="split_offload")
 
 ## Packing API
 
+For ordinary Tunix SFT training, keep the normal trainer flow and pass an
+optional packing config when the model input function is registered:
+
+```python
+from tunix_accel import TunixPackingConfig
+
+trainer = peft_trainer.PeftTrainer(...).with_gen_model_input_fn(
+    gen_model_input_fn,
+    packing=TunixPackingConfig(
+        max_length=2048,
+        pad_token_id=0,
+        strategy="best_fit_decreasing",
+    ),
+)
+trainer.train(train_ds, eval_ds)
+```
+
+Omit `packing=` to run Tunix normally. Pass `packing=False` on a trainer to
+force packing off even when the legacy process-wide packing wrapper is enabled.
+The package widens `PeftTrainer.with_gen_model_input_fn` at import time, but the
+dataset is only packed for trainers that opt in.
+
+The lower-level packer remains available for no-model efficiency checks or
+custom dataloaders:
+
 ```python
 from tunix_accel.packing import pack_records
 
@@ -186,7 +212,7 @@ tunix_batch = packed.as_tunix()
 ```
 
 The packed batch includes `input_ids`, `labels`, `loss_mask`, `input_mask`,
-per-segment reset `positions`, `segment_ids`, and an optional block-causal
+per-segment reset `positions`, `segment_ids`, and a block-causal
 `attention_mask` that prevents attention leakage between packed samples.
 `as_tunix()` maps `loss_mask` to Tunix's `input_mask` argument and keeps the
 token-valid mask as `valid_mask`.

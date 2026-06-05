@@ -134,6 +134,28 @@ def _patch_cce(module: ModuleType | None = None) -> None:
   setattr(target, "_tunix_accel_autopatched", True)
 
 
+def _patch_tunix_packing_api(module: ModuleType | None = None) -> None:
+  if not _env_enabled():
+    return
+  target = module or sys.modules.get(CCE_TARGET_MODULE)
+  if target is None or getattr(
+      target,
+      "_tunix_accel_packing_api_autopatched",
+      False,
+  ):
+    return
+
+  from tunix_accel import tunix_packing  # pylint: disable=import-outside-toplevel
+
+  tunix_packing.patch_trainer_api(target)
+  setattr(target, "_tunix_accel_packing_api_autopatched", True)
+
+
+def _patch_peft_trainer(module: ModuleType | None = None) -> None:
+  _patch_tunix_packing_api(module)
+  _patch_cce(module)
+
+
 def _patch_gemma3_tiled_mlp(module: ModuleType | None = None) -> None:
   if not _env_enabled() or _env_bool(ENV_DISABLE_TILED_MLP, default=False):
     return
@@ -276,7 +298,7 @@ def _patch_gemma4(module: ModuleType | None = None) -> None:
 
 
 _PATCHERS = {
-    CCE_TARGET_MODULE: _patch_cce,
+    CCE_TARGET_MODULE: _patch_peft_trainer,
     GEMMA3_TARGET_MODULE: _patch_gemma3,
     GEMMA4_TARGET_MODULE: _patch_gemma4,
 }

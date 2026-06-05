@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def _run_python(code: str, *, env: dict[str, str] | None = None) -> str:
   run_env = os.environ.copy()
   run_env.pop("TUNIX_ACCEL_DISABLE_AUTOPATCH", None)
+  run_env.pop("TUNIX_ACCEL_DISABLE_CE", None)
   run_env.pop("TUNIX_ACCEL_DISABLE_TILED_MLP", None)
   run_env.pop("TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY", None)
   run_env.pop("TUNIX_ACCEL_ACTIVATION_POLICY", None)
@@ -64,6 +65,24 @@ def test_gemma3_tiled_mlp_autopatch_installs_on_import() -> None:
       """
   )
   assert output.endswith("gemma3_tiled_mlp_autopatch=ok")
+
+
+def test_tunix_packing_api_autopatches_on_peft_trainer_import() -> None:
+  output = _run_python(
+      """
+      import inspect
+      from tunix.sft import peft_trainer
+
+      signature = inspect.signature(
+          peft_trainer.PeftTrainer.with_gen_model_input_fn
+      )
+      assert "packing" in signature.parameters
+      assert getattr(peft_trainer, "_tunix_accel_packing_api_autopatched", False)
+      print("tunix_packing_api_autopatch=ok")
+      """,
+      env={"TUNIX_ACCEL_DISABLE_CE": "true"},
+  )
+  assert output.endswith("tunix_packing_api_autopatch=ok")
 
 
 def test_gemma3_tiled_mlp_autopatch_can_be_disabled() -> None:

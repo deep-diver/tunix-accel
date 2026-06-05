@@ -50,19 +50,23 @@ packed = pack_records(
 batch = packed.as_tunix()
 ```
 
-For existing Tunix datasets that already yield padded batches, use the Tunix
-adapter:
+For existing Tunix datasets that already yield padded batches, keep the normal
+Tunix trainer flow and add an optional packing config when registering the model
+input function:
 
 ```python
 from tunix_accel import TunixPackingConfig
-from tunix_accel import install_packing
 
-install_packing(TunixPackingConfig())
-trainer.train(train_ds)
+trainer = trainer.with_gen_model_input_fn(
+    gen_model_input_fn,
+    packing=TunixPackingConfig(max_length=512, pad_token_id=0),
+)
+trainer.train(train_ds, eval_ds)
 ```
 
-The adapter changes the training dataset and model input function. It does not
-patch the model, optimizer, or loss formula.
+The adapter changes the training dataset and model input function only for that
+trainer. It does not patch the model, optimizer, or loss formula. Omit
+`packing=` to run Tunix normally.
 
 ## 3. Verification Tests
 

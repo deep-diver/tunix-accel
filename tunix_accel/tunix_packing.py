@@ -22,6 +22,10 @@ from tunix_accel.packing import PackingStrategy
 from tunix_accel.packing import pack_records
 
 
+_TRAINER_PACKING_CONFIG_ATTR = "_tunix_accel_packing_config"
+_PACKING_DISABLED = object()
+
+
 @dataclass(frozen=True)
 class TunixPackingConfig:
   """Configuration for adapting Tunix batches to sequence-packed batches."""
@@ -40,7 +44,10 @@ class TunixPackingConfig:
 @dataclass
 class _PatchState:
   installed: bool = False
+  api_patched: bool = False
   original_train: Any | None = None
+  original_with_gen_model_input_fn: Any | None = None
+  trainer_cls: Any | None = None
   config: TunixPackingConfig = TunixPackingConfig()
 
 
@@ -232,46 +239,157 @@ def packed_input_fn(
   return gen_model_input_fn
 
 
+def _coerce_packing_config(packing: Any) -> TunixPackingConfig | None:
+  if packing is None:
+    return None
+  if packing is False:
+    return None
+  if packing is True:
+    return TunixPackingConfig()
+  if isinstance(packing, TunixPackingConfig):
+    return packing
+  if isinstance(packing, Mapping):
+    return TunixPackingConfig(**packing)
+  raise TypeError(
+      "packing must be None, False, True, a TunixPackingConfig, or a mapping "
+      f"of TunixPackingConfig fields; got {type(packing)!r}."
+  )
+
+
+def _wrap_gen_model_input_fn(
+    gen_model_input_fn: Any,
+    config: TunixPackingConfig,
+):
+  if getattr(gen_model_input_fn, "_tunix_accel_packing_wrapped", False):
+    return gen_model_input_fn
+
+  packed_fn = packed_input_fn(
+      pad_token_id=config.pad_token_id,
+      token_key=config.token_key,
+  )
+
+  def _packed_gen_model_input_fn(batch):
+    model_inputs = {}
+    if gen_model_input_fn is not None:
+      model_inputs = dict(gen_model_input_fn(batch))
+    model_inputs.update(packed_fn(batch))
+    return model_inputs
+
+  setattr(_packed_gen_model_input_fn, "_tunix_accel_packing_wrapped", True)
+  return _packed_gen_model_input_fn
+
+
+def _trainer_config(self) -> TunixPackingConfig | None:
+  config = getattr(self, _TRAINER_PACKING_CONFIG_ATTR, None)
+  if config is _PACKING_DISABLED:
+    return None
+  if isinstance(config, TunixPackingConfig):
+    return config
+  if _STATE.installed:
+    return _STATE.config
+  return None
+
+
+def _ensure_packed_input_fn(self, config: TunixPackingConfig) -> None:
+  gen_model_input_fn = getattr(self, "gen_model_input_fn", None)
+  if getattr(gen_model_input_fn, "_tunix_accel_packing_wrapped", False):
+    return
+  assert _STATE.original_with_gen_model_input_fn is not None
+  _STATE.original_with_gen_model_input_fn(
+      self,
+      _wrap_gen_model_input_fn(gen_model_input_fn, config),
+  )
+
+
+def patch_trainer_api(peft_trainer_module: Any | None = None) -> None:
+  """Adds optional ``packing=`` support to Tunix ``PeftTrainer``.
+
+  This only widens the trainer API. It is a no-op for normal Tunix code unless a
+  caller passes ``packing=`` to ``with_gen_model_input_fn`` or enables the legacy
+  process-wide ``install()`` wrapper below.
+  """
+  if peft_trainer_module is None:
+    from tunix.sft import peft_trainer as peft_trainer_module  # pylint: disable=import-outside-toplevel
+
+  trainer_cls = peft_trainer_module.PeftTrainer
+  if _STATE.api_patched:
+    if _STATE.trainer_cls is trainer_cls:
+      return
+    raise RuntimeError("Tunix packing API is already patched on another trainer.")
+
+  _STATE.original_train = trainer_cls.train
+  _STATE.original_with_gen_model_input_fn = trainer_cls.with_gen_model_input_fn
+  _STATE.trainer_cls = trainer_cls
+
+  def _with_gen_model_input_fn(self, gen_model_input_fn, *, packing=None):
+    if packing is False:
+      setattr(self, _TRAINER_PACKING_CONFIG_ATTR, _PACKING_DISABLED)
+      config = None
+    else:
+      config = _coerce_packing_config(packing)
+      setattr(self, _TRAINER_PACKING_CONFIG_ATTR, config)
+    if config is not None:
+      gen_model_input_fn = _wrap_gen_model_input_fn(gen_model_input_fn, config)
+    return _STATE.original_with_gen_model_input_fn(self, gen_model_input_fn)
+
+  def _packed_aware_train(
+      self,
+      train_ds,
+      eval_ds=None,
+      skip_jit=False,
+      *,
+      cache_nnx_graph=True,
+  ):
+    config = _trainer_config(self)
+    if config is not None:
+      train_ds = pack_tunix_batches(train_ds, config)
+      _ensure_packed_input_fn(self, config)
+    return _STATE.original_train(
+        self,
+        train_ds,
+        eval_ds=eval_ds,
+        skip_jit=skip_jit,
+        cache_nnx_graph=cache_nnx_graph,
+    )
+
+  trainer_cls.with_gen_model_input_fn = _with_gen_model_input_fn
+  trainer_cls.train = _packed_aware_train
+  _STATE.api_patched = True
+
+
+def restore_trainer_api() -> None:
+  """Restores the original Tunix trainer API.
+
+  This is mostly useful for tests. Normal installed environments keep the
+  widened API active because it is inert until ``packing=`` is supplied.
+  """
+  if not _STATE.api_patched or _STATE.trainer_cls is None:
+    return
+  _STATE.trainer_cls.train = _STATE.original_train
+  _STATE.trainer_cls.with_gen_model_input_fn = (
+      _STATE.original_with_gen_model_input_fn
+  )
+  _STATE.installed = False
+  _STATE.api_patched = False
+  _STATE.original_train = None
+  _STATE.original_with_gen_model_input_fn = None
+  _STATE.trainer_cls = None
+
+
 def install(config: TunixPackingConfig | None = None) -> None:
-  """Installs a process-local ``PeftTrainer.train`` packing wrapper.
+  """Enables process-wide Tunix packing for legacy experiments.
 
   The wrapper only transforms the training dataset and packed input function. It
   leaves Tunix's loss function alone, so it composes with the CCE patch.
   """
-  from tunix.sft import peft_trainer  # pylint: disable=import-outside-toplevel
-
   config = config or TunixPackingConfig()
-  if not _STATE.installed:
-    _STATE.original_train = peft_trainer.PeftTrainer.train
-
-    def _packed_train(self, train_ds, eval_ds=None, skip_jit=False, **kwargs):
-      packed_ds = pack_tunix_batches(train_ds, _STATE.config)
-      self.with_gen_model_input_fn(
-          packed_input_fn(
-              pad_token_id=_STATE.config.pad_token_id,
-              token_key=_STATE.config.token_key,
-          )
-      )
-      return _STATE.original_train(
-          self,
-          packed_ds,
-          eval_ds=eval_ds,
-          skip_jit=skip_jit,
-          **kwargs,
-      )
-
-    peft_trainer.PeftTrainer.train = _packed_train
-    _STATE.installed = True
+  patch_trainer_api()
   _STATE.config = config
+  _STATE.installed = True
 
 
 def uninstall() -> None:
-  """Restores Tunix's original ``PeftTrainer.train`` method."""
-  if not _STATE.installed:
-    return
-  from tunix.sft import peft_trainer  # pylint: disable=import-outside-toplevel
-
-  peft_trainer.PeftTrainer.train = _STATE.original_train
+  """Disables process-wide Tunix packing installed by ``install()``."""
   _STATE.installed = False
 
 
@@ -283,7 +401,7 @@ def is_installed() -> bool:
 def packed(config: TunixPackingConfig | None = None):
   """Temporarily installs the Tunix packing wrapper."""
   was_installed = _STATE.installed
-  old_train = _STATE.original_train
+  was_api_patched = _STATE.api_patched
   old_config = _STATE.config
   install(config)
   try:
@@ -291,7 +409,7 @@ def packed(config: TunixPackingConfig | None = None):
   finally:
     if was_installed:
       _STATE.config = old_config
-      _STATE.original_train = old_train
     else:
       uninstall()
-
+    if not was_api_patched:
+      restore_trainer_api()
