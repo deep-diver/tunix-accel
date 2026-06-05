@@ -6,6 +6,8 @@ This directory contains the final artifacts for the CCE experiment.
 
 - `TECHNICAL_REPORT.md`: final narrative report with embedded plots.
 - `REPRODUCE.md`: guide for reproducing the experiment family.
+- `GEMMA3_270M_EXPERIMENT_DESIGN.md`: clean rerun design for rebuilding the CCE
+  evidence chain around Gemma3 270M before scaling the claim outward.
 - `assets/`: final plots used by the report.
 - `data/`: compact CSV/JSONL summaries retained from the experiments,
   including the Gemma4 base boundary rows.
