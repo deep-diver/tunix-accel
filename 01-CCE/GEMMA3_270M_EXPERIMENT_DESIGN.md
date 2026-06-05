@@ -1,5 +1,19 @@
 # Gemma3 270M CCE Experiment Design
 
+## Execution Status
+
+This design has been executed on Cloud TPU `v5litepod-1`, one chip, in
+`us-west4-a`. The retained results live under:
+
+- `01-CCE/data/gemma3_270m_full_cce/`
+- `01-CCE/assets/gemma3_270m_cce_frontier.png`
+- `01-CCE/assets/gemma3_270m_cce_status_heatmap.png`
+- `01-CCE/assets/gemma3_270m_cce_tuning.png`
+- `01-CCE/assets/gemma3_270m_cce_quality.png`
+
+The final narrative is `01-CCE/TECHNICAL_REPORT.md`, and reproduction steps are
+in `01-CCE/REPRODUCE.md`.
+
 This document defines the next clean 01-CCE experiment family. The goal is to
 rebuild the CCE report around one complete model first: Gemma3 270M LoRA SFT on
 TPU. Larger Gemma3 and Gemma4 rows should later be used as transfer checks, not
@@ -303,4 +317,3 @@ The final 01-CCE report should be rebuilt around this order:
 
 The hero figure should be the 270M frontier. Larger model rows should appear
 only after the reader already understands the 270M result.
-

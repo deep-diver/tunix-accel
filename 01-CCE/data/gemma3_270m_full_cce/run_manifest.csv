@@ -1,0 +1,9 @@
+artifact,bytes,profile,tpu,chips,project,zone,model
+data/gemma3_270m_full_cce/raw_artifacts/gemma3-270m-cce-rerun-chunk.tar.gz,3759941,chunk,v5litepod-1,1,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
+data/gemma3_270m_full_cce/raw_artifacts/gemma3-270m-cce-rerun-frontier-high.tar.gz,2561409,frontier-high,v5litepod-1,1,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
+data/gemma3_270m_full_cce/raw_artifacts/gemma3-270m-cce-rerun-frontier-low.tar.gz,5189268,frontier-low,v5litepod-1,1,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
+data/gemma3_270m_full_cce/raw_artifacts/gemma3-270m-cce-rerun-parity.tar.gz,1033112,parity,v5litepod-1,1,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
+data/gemma3_270m_full_cce/raw_artifacts/gemma3-270m-cce-rerun-quality-capacity.tar.gz,330620,quality-capacity,v5litepod-1,1,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
+data/gemma3_270m_full_cce/raw_artifacts/gemma3-270m-cce-rerun-quality-cce.tar.gz,894111,quality-cce,v5litepod-1,1,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
+data/gemma3_270m_full_cce/raw_artifacts/gemma3-270m-cce-rerun-quality-default.tar.gz,900138,quality-default,v5litepod-1,1,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
+data/gemma3_270m_full_cce/raw_artifacts/gemma3-270m-cce-rerun-rank.tar.gz,5385509,rank,v5litepod-1,1,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it

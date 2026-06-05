@@ -1,220 +1,229 @@
-# JAX/Tunix + TPU CCE Technical Report
+# Cut Cross Entropy on JAX/Tunix TPU: Gemma3 270M Full Rerun
 
-This report consolidates the Cut Cross Entropy (CCE) experiments we ran on JAX/Tunix + Cloud TPU. The question was simple: if we replace dense full-vocab cross entropy with a CCE loss implementation, can we recover the kind of memory benefit Unsloth reports, while keeping loss and generation quality intact?
+This report rebuilds the CCE evidence chain around a single complete target:
+Gemma3 270M LoRA SFT on Cloud TPU v5e. Larger-model rows can still be used as
+transfer checks, but the main claim here is intentionally narrow and
+reproducible: on Gemma3 270M, Cut Cross Entropy removes a real loss-logits
+memory wall without materially changing the training result.
 
 ## Executive Summary
 
-| Metric | Result |
+| Question | Result |
 | --- | --- |
-| EN-FR b16 train-step XLA peak memory reduction | 78.3% |
-| BLEU delta, CCE b16 vs Default b16 | -0.01 |
-| Eval loss delta, CCE b16 vs Default b16 | +0.0005 |
-| Same-batch profiled step-time cost | 1.73x |
+| Does CCE move the feasible batch/context frontier? | Yes. On `v5litepod-1`, b16 moved from L512 to L1024, b32 moved from L256 to L1024, and b64 moved from no Default CE fit to L512 with CCE. |
+| Does it reduce memory at matched passing shapes? | Yes. Rank-sensitive matched rows show about 43-68% XLA planned HBM reduction. The OPUS100 b16/L512 run dropped from 12.57 GiB/chip to 4.98 GiB/chip. |
+| Does real training still behave normally? | Yes. OPUS100 EN-FR b16/L512 LoRA SFT produced final train loss 0.1731 vs 0.1766 and eval loss 3.4292 vs 3.4251 for Default CE vs CCE. |
+| What is the tradeoff? | Same-shape training is slower. In the 5,000-step b16/L512 run, mean step time rose from 0.106s to 0.196s. |
+| What TPU was used? | All 270M rerun rows used Cloud TPU `v5litepod-1`, one chip, in `us-west4-a`. |
 
-The short version: CCE avoids materializing the full `[tokens, vocab]` logits tensor during the loss computation. That directly attacks the tensor that grows with batch size, context length, and vocabulary size. In our Gemma3/Tunix TPU runs, this expanded the trainable context frontier and reduced XLA planned HBM sharply. In the real OPUS100 EN-FR training run, CCE preserved eval loss and BLEU almost exactly, but it was slower at the same batch size.
+The memory metric used throughout the new 270M plots is **max per-chip XLA
+buffer-assignment planned HBM**. This is the number that decides whether a TPU
+program fits on a chip. Runtime HBM snapshots are retained when the worker
+reported them, but they are not the primary frontier axis.
 
-## 1. The Target: the Loss Logits Tensor
+## Why This Should Work
 
-The default CE path computes the full language-model logits by multiplying hidden states by the LM head, then applies softmax cross entropy over the vocabulary. For a training batch, that intermediate tensor is roughly:
-
-```text
-batch_size * context_length * vocab_size
-```
-
-CCE keeps the same objective, but computes the needed log-sum-exp and target-token logit without materializing the full logits matrix. In this implementation, those reductions are streamed over token/vocab chunks. The Tunix/Gemma3 training path was patched so the train-step loss used CCE while generation still used the normal decode path.
-
-As a sanity check, the early microbenchmark found that dense CE failed at the b16, seq_len 2048, Gemma3-270M-like shape, while CCE ran:
-
-| Kernel | Status | Key tensor estimate | Compile + first run | Interpretation |
-| --- | --- | --- | --- | --- |
-| naive_ce | FAILED | 32,752 MB | OOM | full vocab logits materialization |
-| cce | OK | 320 MB | 0.559 s | streamed vocab/tokens |
-
-The small parity test produced dense CE loss 8.70297, CCE loss 8.70004, absolute loss difference 0.00293, and hidden-gradient max absolute difference 0.00261. That is not a full numerical proof, but it was enough to move from microbenchmarks to Gemma/Tunix training.
-
-## 2. First Result: Context Length Becomes the Clearest Memory Story
-
-The context sweep used synthetic SFT input. That is deliberate: this stage is not a language-quality benchmark. It isolates the memory pressure created by `batch * context * vocab` and asks whether the same model and TPU can compile and run when only the loss implementation changes.
-
-The memory metric below is not a live TPU profiler allocation sample. It is XLA
-buffer-assignment planned HBM. The figure uses max per-chip HBM, because the TPU
-fit decision is per chip. The retained CSV also includes aggregate accounting:
+Default language-model cross entropy usually materializes a full logits tensor
+with shape roughly:
 
 ```text
-aggregate_xla_hbm_gib = max_per_chip_xla_peak_gib * allocated_chip_count
+batch_size * context_length * vocabulary_size
 ```
 
-That aggregate value is useful for resource accounting, but it is not one
-contiguous memory pool and is not used as the visual axis.
+That tensor grows directly with the two knobs we care about for SFT capacity:
+batch and context length. CCE computes the same cross-entropy objective by
+streaming over token/vocab chunks, avoiding the dense full-vocab logits tensor
+in the loss path.
 
-![Context length turns the logits tensor into the memory wall.](assets/gemma3_270m_1b_context_memory.png)
+The Tunix integration is a drop-in patch for the LoRA training path. During
+training, it intercepts the model output before the tied LM-head decode and
+computes CCE against the frozen LM head. During generation, the original decode
+path is restored before sampling. A regression test now guards that restore
+path because generation must not see the hidden-state intercept.
 
-*Context length turns the logits tensor into the memory wall.*
+## Experiment Scope
 
-The frontier view makes the user-visible result easier to read. CCE did not merely reduce a number in a memory report. It moved the maximum completed context length.
+| Field | Value |
+| --- | --- |
+| Model | `google/gemma-3-270m-it` |
+| Training mode | Tunix PEFT/LoRA |
+| Main LoRA rank | 16 |
+| TPU | Cloud TPU `v5litepod-1`, 1 chip |
+| Zone | `us-west4-a` |
+| Systems dataset | deterministic synthetic SFT records |
+| Quality dataset | OPUS100 EN-FR |
+| Compared variants | Default CE vs CCE |
+| Other acceleration patches | disabled |
+| Default CCE chunks | token chunk 128, vocab chunk 8192 unless swept |
 
-![The practical outcome is a larger trainable context frontier.](assets/gemma3_270m_1b_context_frontier.png)
+The rerun produced 307 result rows: frontier sweeps, pressure points, rank
+sensitivity, chunk tuning, one-step parity, and OPUS100 training runs.
 
-*The practical outcome is a larger trainable context frontier.*
+## 1. Frontier: CCE Moves the Fit Boundary
 
-The same result as a table:
+The frontier sweep is deliberately synthetic. It is not intended to prove
+translation quality. Its job is to isolate the `batch * context * vocab` memory
+pressure and ask whether the same model, TPU, and LoRA configuration can run
+when only the loss implementation changes.
 
-| Model | Batch | Default CE max context | CCE max context | Gain |
-| --- | --- | --- | --- | --- |
-| 270M | 8 | 1,024 | 4,096 | 4.0x |
-| 270M | 16 | 512 | 4,096 | 8.0x |
-| 270M | 32 | none | 2,048 | default none |
-| 270M | 64 | none | 1,024 | default none |
-| 1B | 8 | 2,048 | 8,192 | 4.0x |
-| 1B | 16 | 1,024 | 4,096 | 4.0x |
-| 1B | 32 | 512 | 4,096 | 8.0x |
-| 1B | 64 | none | 2,048 | default none |
+![Gemma3 270M CCE frontier](./assets/gemma3_270m_cce_frontier.png)
 
-The two headline rows are:
+The left panel is the practical result: maximum completed context length by
+batch size. The right panel shows the underlying XLA planned HBM pressure for
+representative batch sizes.
 
-- Gemma3 270M, batch 16: Default CE completed context 512; CCE completed context 4,096.
-- Gemma3 1B, batch 16: Default CE completed context 1,024; CCE completed context 4,096.
+| Batch | Default CE max context | CCE max context | Gain |
+| --- | ---: | ---: | ---: |
+| 1 | 8,192 | 8,192 | 1.0x |
+| 2 | 4,096 | 4,096 | 1.0x |
+| 4 | 2,048 | 4,096 | 2.0x |
+| 8 | 1,024 | 2,048 | 2.0x |
+| 16 | 512 | 1,024 | 2.0x |
+| 32 | 256 | 1,024 | 4.0x |
+| 64 | none | 512 | CCE-only fit |
+| 128 | none | 256 | CCE-only fit |
 
-## 3. Second Result: the Fixed-Shape Pressure Point Generalizes
+The important pattern is not that CCE makes every shape fit. It moves the wall.
+For small batches, both variants can still be limited by other model or
+activation buffers. As batch grows, the loss-logits tensor becomes the visible
+wall, and CCE opens shapes that Default CE cannot compile.
 
-After the context sweep, we fixed a pressure point and compared model sizes. For
-Gemma3, the pressure point is LoRA batch 16, max length 2048. For Gemma4, the
-retained base-checkpoint check uses LoRA batch 1, max length 2048 because the
-larger base checkpoints already hit the compile boundary there. The Gemma4 rows
-are not translation-quality runs; they are systems boundary checks using the
-same OPUS100 EN-FR-shaped SFT input path with quality evaluation disabled.
+The pass/fail map shows that the sweep did not stop at the first Default CE
+failure. CCE was pushed until it reached its own boundary.
 
-![Cut Cross Entropy boundary outcomes across Gemma3 and Gemma4.](assets/gemma3_gemma4_cce_per_chip_hbm.png)
+![Gemma3 270M CCE pass/fail map](./assets/gemma3_270m_cce_status_heatmap.png)
 
-*CCE is the same loss-logits memory lever across the retained Gemma3 and Gemma4
-boundary rows. The pressure point is not identical across families, so each row
-labels its batch, length, and TPU slice.*
+## 2. Pressure Points: Same Shape, Different Memory Wall
 
-The table below is the same story numerically. The figure uses max per-chip HBM
-pressure because that is the value that decides whether a TPU program fits. The
-aggregate accounting is still useful, but it is a secondary reporting value
-because the chip count changes across rows.
+The pressure-point rows keep the sweep readable by focusing on a few
+representative shapes.
 
-| Model | Chips | Default max/chip | CCE max/chip | Aggregate accounting | Default status | CCE status |
-| --- | --- | --- | --- | --- | --- | --- |
-| Gemma3 270M, b16/L2048 | 1 | 17.0 GiB planned | 6.5 GiB planned | 17.0 -> 6.5 GiB | OOM | OK |
-| Gemma3 1B, b16/L2048 | 4 | 15.5 GiB planned | 4.7 GiB planned | 62.1 -> 18.9 GiB | OOM | OK |
-| Gemma3 4B, b16/L2048 | 8 | 23.3 GiB planned | 16.6 GiB planned | 186.8 -> 132.6 GiB | OOM | OOM |
-| Gemma4 E2B, b1/L2048 | 4 | 16.6 GB compile estimate | 5.2 GB runtime peak | 66.4 -> 20.66 GB | OOM | OK |
-| Gemma4 E4B, b1/L2048 | 8 | 19.8 GB compile estimate | 17.6 GB compile estimate | 158.5 -> 141.2 GB | OOM | OOM |
+| Shape | Default CE | Default XLA HBM | CCE | CCE XLA HBM |
+| --- | --- | ---: | --- | ---: |
+| b16/L512 | OK | 12.57 GiB/chip | OK | 4.98 GiB/chip |
+| b16/L1024 | compile OOM | 21.36 GiB/chip | OK | 9.65 GiB/chip |
+| b32/L512 | compile OOM | 21.32 GiB/chip | OK | 8.13 GiB/chip |
+| b32/L1024 | compile OOM | 45.45 GiB/chip | OK | 14.26 GiB/chip |
+| b64/L512 | compile OOM | 57.41 GiB/chip | OK | 14.13 GiB/chip |
+| b64/L1024 | resource exhausted | 88.02 GiB/chip | compile OOM | 25.16 GiB/chip |
 
-The guardrail is now clearer than in the Gemma3-only plot: CCE can flip a
-loss-logits-driven boundary, but it does not erase every other memory source.
-Gemma3 4B and Gemma4 E4B both still need another lever after CCE.
+This is the cleanest systems result: CCE turns multiple Default CE OOM rows into
+completed TPU train steps, and the remaining CCE failures occur at much higher
+pressure points.
 
-## 4. Third Result: Real EN-FR Training Keeps Quality at the Same Batch Size
+## 3. Rank and Chunk Checks
 
-The synthetic sweeps show memory behavior, but they do not prove the training path is useful. For that, we ran Gemma3 270M LoRA SFT on OPUS100 EN-FR for 5,000 steps.
+CCE should mostly track `batch * context * vocab`, not LoRA rank. The rank sweep
+used ranks 4, 16, and 64 across b8/b16/b32/b64 and L512/L1024/L2048/L4096.
+The frontier pattern was unchanged across ranks: for example, b16 moved from
+L512 to L1024 and b32 moved from no Default CE fit at L512 to CCE fitting
+through L1024.
 
-The comparison below is deliberately apples-to-apples: batch 16, max length 512, LoRA rank 16, learning rate 2e-4, Cloud TPU v5e `v5litepod-1`, one chip, same token budget.
+The chunk sweep asks a different question: once CCE is enabled, which token/vocab
+chunk sizes are faster at a fixed shape? On b16/L512, all tested chunk pairs
+used roughly the same XLA planned HBM, but step time varied.
 
-| Run | TPU | Batch | Max length | Steps | Rank | LR | Eval loss | XLA peak | Step avg | Wall time | BLEU | chrF |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Default CE b16 | v5litepod-1 x 1 | 16 | 512 | 5000 | 16 | 0.0002 | 1.680 | 10.21 GiB | 0.092 s | 10.7 min | 22.29 | 50.75 |
-| CCE b16 | v5litepod-1 x 1 | 16 | 512 | 5000 | 16 | 0.0002 | 1.681 | 2.21 GiB | 0.160 s | 17.9 min | 22.29 | 50.27 |
+![Gemma3 270M CCE tuning checks](./assets/gemma3_270m_cce_tuning.png)
 
-The loss curves overlap closely. The raw tqdm loss is also shown in the plot; after the first few steps, the recorded raw loss is already very smooth because the log values are rounded and the two runs follow almost the same trajectory.
+The best b16/L512 chunk rows were:
 
-![Real EN-FR training preserves the loss trajectory.](assets/01_loss_history_line_chart.png)
+| Token chunk | Vocab chunk | Mean step time | Valid tokens/sec | XLA HBM |
+| ---: | ---: | ---: | ---: | ---: |
+| 512 | 16K | 0.141s | 12,588 | 4.98 GiB/chip |
+| 256 | 32K | 0.146s | 12,134 | 4.98 GiB/chip |
+| 256 | 16K | 0.150s | 11,868 | 4.98 GiB/chip |
+| 512 | 4K | 0.157s | 11,312 | 4.98 GiB/chip |
 
-*Real EN-FR training preserves the loss trajectory.*
+The default package knobs remain conservative (`128`, `8192`) because they are
+stable across shapes. The sweep suggests that larger token chunks may be faster
+for this particular 270M b16/L512 case, but chunk tuning should be shape-aware.
 
-The normalized metric chart compresses the result into one view: memory drops sharply, eval loss and BLEU stay essentially unchanged, and same-batch training gets slower.
+## 4. Real EN-FR Training Parity
 
-![The real-training tradeoff: much lower memory, same quality, slower steps.](assets/02_normalized_metric_comparison.png)
+The systems sweeps prove memory behavior, not usefulness. For a training sanity
+check, we ran OPUS100 EN-FR LoRA SFT.
 
-*The real-training tradeoff: much lower memory, same quality, slower steps.*
+Same-shape A/B:
 
-Generation metrics after restoring the normal decode path:
+| Field | Default CE | CCE |
+| --- | ---: | ---: |
+| Batch / max length | b16 / L512 | b16 / L512 |
+| Steps | 5,000 | 5,000 |
+| LoRA rank | 16 | 16 |
+| Learning rate | 2e-4 | 2e-4 |
+| Final train loss | 0.1731 | 0.1766 |
+| Eval loss | 3.4292 | 3.4251 |
+| BLEU sanity metric | 16.54 | 18.72 |
+| chrF sanity metric | 41.22 | 40.34 |
+| XLA planned HBM | 12.57 GiB/chip | 4.98 GiB/chip |
+| Mean step time | 0.106s | 0.196s |
+| Wall time | 10.0 min | 18.2 min |
 
-| Run | Restored step | Eval examples | BLEU | chrF |
-| --- | --- | --- | --- | --- |
-| default_b16 | 5000 | 16 | 22.294 | 50.752 |
-| cce_b16 | 5000 | 16 | 22.289 | 50.270 |
+![Gemma3 270M OPUS100 EN-FR parity](./assets/gemma3_270m_cce_quality.png)
 
-Important caveat: BLEU/chrF here uses only 16 evaluation examples. Treat it as a parity check that the loss replacement did not break generation quality, not as a full translation benchmark.
+The loss curves follow the same trajectory. The normalized metric panel shows
+the tradeoff clearly: much lower planned HBM, similar train/eval loss, and
+slower same-shape steps.
 
-## 5. Translation Samples
+BLEU and chrF here are deliberately labeled as sanity metrics. They use 16
+evaluation examples, so they are useful for catching obvious generation
+breakage, not for making a translation-quality claim.
 
-Below are examples from the final fixed evaluation. In many cases, Default CE b16 and CCE b16 produce identical or near-identical translations. When they are wrong, they tend to be wrong in similar ways, which is exactly what we would expect if the loss implementation changed memory behavior without changing the learned task qualitatively.
+We also ran a CCE capacity row: b64/L512 for 1,250 steps, matching the rough
+token budget of b16/L512 for 5,000 steps. It fit at 14.13 GiB/chip and finished
+in 19.2 minutes. That row did not create a speed win in this setup; it mainly
+shows that CCE can spend the saved memory on a much larger batch.
 
-### Sample 1
+## 5. Generation Samples
 
-- EN source: They met without me.
-- FR reference: Ils se sont rencontrés sans moi.
-- Default CE b16: Ils se sont rencontrés sans moi.
-- CCE b16: Ils se sont rencontrés sans moi.
+The restored generation path produced normal text for both variants. The
+outputs below are not polished translation results; the point is that CCE and
+Default CE are in the same qualitative band after the same training recipe.
 
-### Sample 2
+| EN source | Reference | Default CE | CCE |
+| --- | --- | --- | --- |
+| They met without me. | Ils se sont rencontrés sans moi. | - Ils ne sont pas venus pour moi. | Ils ne sont pas venus sans que je ne soit en aware. |
+| Pay cash week . | J'ai payé en liquide pour la semaine. | Pay week . | Paye de la semaine. |
+| The certifrcate can be printed in one or more of the languages of the Convention andshould be completed in one of these languages. | Le certificat peut être imprimé dans une ou plusieurs langues de la convention et doit être complété dans l'une de ces langues. | La certificat peut être imprimé dans un des langues de la Convention et complété dans une des langue | La certificatabilité peut être imprimée dans une ou des langues de la Convention et peut être compli |
+| The other issue, which is of enormous significance, is the right to the veto. | L'autre question, d'une portée énorme, est le droit de veto. | L'autre aspect important du droit à veto, qui est de grande importance, est le droit à l'apanche. | Encore heureux, on questionne aussi le droit à la proposition, à cette aussi, du autre facteur qui rend cette session si importante : l'énoncé de fait du veto. |
+| Therefore, let me summarize, at least from the vantage point of one Finance Minister. | Par conséquent, permettez-moi d'en résumer la teneur, à tout le moins en tant que ministre des finances. | Par conséquent, je veux vous rappeler, d'un point de vue financier. | Par conséquent, je veux te rappeler au moins l'angle de l'examinateur. |
 
-- EN source: The minister Villedrouin, stressed in his speech on Haiti's image outside and the political positioning of Haiti as a tourist destination.
-- FR reference: La Ministre Villedrouin, a insisté, dans son intervention, sur l’image d’Haïti à l’extérieur et sur la politique de positionnement d’Haïti comme destination touristique.
-- Default CE b16: Le ministre Villedrouin, en son discours sur l'image de Haïti à l'extérieur et le positionnement politique de Haïti comme destination touristique, souligne.
-- CCE b16: Le ministre Villedrouin, en son discours sur l'image de Haïti à l'extérieur et le positionnement politique de Haïti comme destination touristique, souligne.
-
-### Sample 3
-
-- EN source: Pay cash week .
-- FR reference: J'ai payé en liquide pour la semaine.
-- Default CE b16: Paye de la semaine de la fête .
-- CCE b16: Paye de la semaine de la fin de l'année .
-
-### Sample 4
-
-- EN source: The certifrcate can be printed in one or more of the languages of the Convention andshould be completed in one of these languages.
-- FR reference: Le certificat peut être imprimé dans une ou plusieurs langues de la convention et doit être complété dans l'une de ces langues.
-- Default CE b16: Le certificat peut être imprimé dans un ou plusieurs des langages de la Convention et doit être terminé dans un des langages.
-- CCE b16: Le certifcate peut être imprimé dans un ou plusieurs des langues de la Convention et doit être terminé dans un de ces langues.
-
-### Sample 5
-
-- EN source: The other issue, which is of enormous significance, is the right to the veto.
-- FR reference: L'autre question, d'une portée énorme, est le droit de veto.
-- Default CE b16: L'autre question, qui est de grande importance, est le droit de veto.
-- CCE b16: L'autre question, qui est de grande importance, est le droit de veto.
-
-### Sample 6
-
-- EN source: What, the surrogacy?
-- FR reference: Quoi, la mère porteuse ?
-- Default CE b16: Quoi, le surrogat ?
-- CCE b16: Quoi, le surrogat ?
-
-### Sample 7
-
-- EN source: Therefore, let me summarize, at least from the vantage point of one Finance Minister.
-- FR reference: Par conséquent, permettez-moi d'en résumer la teneur, à tout le moins en tant que ministre des finances.
-- Default CE b16: Donc, je vous ai résumé, au moins du point de vue d'un Ministre de la Finance.
-- CCE b16: Donc, je vous ai résumé, au moins du point de vue d'un ministre de la Finance.
-
-### Sample 8
-
-- EN source: We recommend the use of Stop if Bid orders only to buy Forex positions. The use of Stop if Bid to sell Forex positions can result in positions being prematurely closed if a market event causes the Bid/Ask spread to temporarily widen.
-- FR reference: Nous recommandons l'utilisation des ordres Stop si Demandé uniquement lors de l'achat de positions sur Devises. L'utilisation des ordres Stop si Demandé lors de la vente de positions sur Devises pourrait engendrer la fermeture prématurée de positions si un événement sur le marché entraîne un élargissement de l'écart entre l'Offre et la Demande pour une courte période.
-- Default CE b16: Nous recommandons l'utilisation de Stop si les ordres de vente ne sont pas utilisés pour acheter des positions Forex. L'utilisation de Stop si les ordres de vente ne sont pas utilisés pour vendre des positions Forex peuvent entraîner une clôture précoce si un événement de marché provoque un effet de la hausse du prix
-- CCE b16: Nous recommandons l'utilisation de Stop si les ordres de vente ne sont pas négociés pour acheter des positions Forex. L'utilisation de Stop si les ordres de vente ne sont pas négociés pour acheter des positions Forex peuvent entraîner un effet précoce si un événement de marché provoque un effet de la hausse du
+The complete 32-row side-by-side sample file is retained as
+`01-CCE/data/gemma3_270m_full_cce/generation_samples.jsonl`.
 
 ## 6. Interpretation
 
-- CCE directly targets the full vocab logits/CE intermediate. That is why its benefit grows with context length and batch size.
-- The clearest product-style story is context frontier, not raw percentage savings. On the validated b16 rows, 270M moved from context 512 to 4,096, and 1B moved from 1,024 to 4,096.
-- In real OPUS100 EN-FR training, Default CE and CCE reached almost the same eval loss and BLEU: 1.6804 vs 1.6809 eval loss, and 22.294 vs 22.289 BLEU.
-- The tradeoff is compute time. At the same batch size, CCE increased profiled step time from 0.092s to 0.160s.
-- The practical value is not that CCE is automatically faster at the same batch. The value is that it can make otherwise impossible batch/context/model combinations trainable.
+CCE is a strong memory lever when the loss logits are a dominant tensor. That is
+why the effect becomes clearer as batch and context grow. It is not a universal
+memory solution: after CCE removes the dense logits tensor, the next wall can be
+activations, attention, model state, sharding layout, or compile-time buffer
+planning.
 
-## 7. Source Artifacts
+The tradeoff is also real. CCE streams reductions instead of doing one dense
+logits computation, so same-shape step time can increase. On the 270M b16/L512
+quality run, the slowdown was about 1.85x. The value of CCE is therefore not
+"always faster." The value is "more trainable shapes before OOM," and sometimes
+that extra capacity may be worth the slower step.
 
-- `01-CCE/data/kernel_matrix.csv`
-- `01-CCE/data/gemma3_270m_1b_context_frontier.csv`
-- `01-CCE/data/gemma3_270m_1b_context_summary.csv`
-- `01-CCE/data/gemma3_b16_aggregate_hbm.csv`
-- `01-CCE/data/gemma4_base_cce_tpu_l2048_b1.csv`
-- `01-CCE/data/gemma4_base_tpu_l2048_b1_all_variants.csv`
-- `01-CCE/data/quality_training_summary.csv`
-- `01-CCE/data/quality_summary.csv`
-- `01-CCE/data/side_by_side.jsonl`
+## 7. Reproducibility Artifacts
+
+Compact data retained from this rerun:
+
+- `01-CCE/data/gemma3_270m_full_cce/run_manifest.csv`
+- `01-CCE/data/gemma3_270m_full_cce/all_runs.csv`
+- `01-CCE/data/gemma3_270m_full_cce/frontier_runs.csv`
+- `01-CCE/data/gemma3_270m_full_cce/frontier_summary.csv`
+- `01-CCE/data/gemma3_270m_full_cce/pressure_points.csv`
+- `01-CCE/data/gemma3_270m_full_cce/rank_sensitivity.csv`
+- `01-CCE/data/gemma3_270m_full_cce/rank_frontier_summary.csv`
+- `01-CCE/data/gemma3_270m_full_cce/chunk_tuning.csv`
+- `01-CCE/data/gemma3_270m_full_cce/training_history.csv`
+- `01-CCE/data/gemma3_270m_full_cce/training_summary.csv`
+- `01-CCE/data/gemma3_270m_full_cce/generation_metrics.csv`
+- `01-CCE/data/gemma3_270m_full_cce/generation_samples.jsonl`
+- `01-CCE/data/gemma3_270m_full_cce/profile_summary.csv`
+- `01-CCE/data/gemma3_270m_full_cce/oom_events.csv`
+
+Compressed raw worker artifacts are retained under
+`01-CCE/data/gemma3_270m_full_cce/raw_artifacts/`. The extracted `raw/`
+directory is reproducible from those tarballs and should not be committed.

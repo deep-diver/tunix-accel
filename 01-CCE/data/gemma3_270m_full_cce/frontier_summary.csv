@@ -1,0 +1,17 @@
+suite,lora_rank,batch_size,variant,max_ok_context,first_failed_context,ok_rows,failed_rows
+frontier_high,16,16,cce,1024,2048,3,5
+frontier_high,16,16,default,512,1024,2,6
+frontier_high,16,32,cce,1024,2048,3,5
+frontier_high,16,32,default,256,512,1,7
+frontier_high,16,64,cce,512,1024,2,6
+frontier_high,16,64,default,0,256,0,8
+frontier_high,16,128,cce,256,512,1,7
+frontier_high,16,128,default,0,256,0,8
+frontier_low,16,1,cce,8192,16384,6,2
+frontier_low,16,1,default,8192,16384,6,2
+frontier_low,16,2,cce,4096,8192,5,3
+frontier_low,16,2,default,4096,8192,5,3
+frontier_low,16,4,cce,4096,8192,5,3
+frontier_low,16,4,default,2048,4096,4,4
+frontier_low,16,8,cce,2048,4096,4,4
+frontier_low,16,8,default,1024,2048,3,5

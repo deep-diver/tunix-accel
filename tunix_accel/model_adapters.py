@@ -80,6 +80,25 @@ def prepare_intercepted_lora_model(model: nnx.Module) -> bool:
   return True
 
 
+def restore_intercepted_lora_model(model: nnx.Module) -> bool:
+  """Restores the original LM-head decode after LoRA CCE training.
+
+  `prepare_intercepted_lora_model` is intentionally process-local and mutates
+  the model object before the trainer traces the loss. That mutation is correct
+  for training/eval loss, but generation must see the normal decode path.
+  """
+  if not hasattr(model, "embedder"):
+    return False
+  if not getattr(model.embedder, "_tunix_accel_decode_identity", False):
+    return False
+  original_decode = getattr(model.embedder, "_tunix_accel_original_decode", None)
+  if original_decode is None:
+    return False
+  model.embedder.decode = original_decode
+  model.embedder._tunix_accel_decode_identity = False  # pylint: disable=protected-access
+  return True
+
+
 def _intercepted_hidden_via_model_call(
     model: nnx.Module,
     input_tokens: jax.Array,

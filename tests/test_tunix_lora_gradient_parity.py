@@ -135,6 +135,31 @@ def test_tiny_gemma_qwix_lora_gradient_parity():
   )
 
 
+def test_lora_decode_restore_after_hidden_intercept():
+  base_model = _tiny_model()
+  provider = qwix.LoraProvider(
+      module_path=".*q_einsum|.*kv_einsum|.*gate_proj|.*down_proj|.*up_proj",
+      rank=4,
+      alpha=8,
+  )
+  model = qwix.apply_lora_to_model(
+      base_model,
+      provider,
+      **base_model.get_model_input(),
+      rngs=nnx.Rngs(1),
+  )
+  tokens, input_mask, positions, attention_mask = _batch()
+  logits_before, _ = model(tokens, positions, None, attention_mask)
+  assert logits_before.shape[-1] == model.config.num_embed
+  assert model_adapters.prepare_intercepted_lora_model(model)
+  hidden, _ = model(tokens, positions, None, attention_mask)
+  assert hidden.shape[-1] == model.config.embed_dim
+  assert model_adapters.restore_intercepted_lora_model(model)
+  logits_after, _ = model(tokens, positions, None, attention_mask)
+  assert logits_after.shape[-1] == model.config.num_embed
+  assert not getattr(model.embedder, "_tunix_accel_decode_identity", False)
+
+
 def test_tiny_gemma_qwix_lora_jit_loss_parity():
   base_model = _tiny_model()
   provider = qwix.LoraProvider(

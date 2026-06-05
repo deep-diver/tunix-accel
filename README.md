@@ -211,17 +211,21 @@ token-valid mask as `valid_mask`.
   `05-GEMMA3-LARGE-SWEEP/REPRODUCE.md`
 - Gemma3 large-model sweep retained data: `05-GEMMA3-LARGE-SWEEP/data/`
 - Gemma3 large-model sweep figures: `05-GEMMA3-LARGE-SWEEP/assets/`
-- Gemma4 base boundary rows: folded into the existing `01-CCE`, `02-PACKING`,
-  `03-TILED-MLP`, and `04-ACTIVATION-POLICY` reports, data, and figures.
+- Gemma4 base boundary rows: retained with the relevant workstream data. The
+  current `01-CCE` report is intentionally rebuilt around the complete Gemma3
+  270M rerun; Gemma4 rows remain transfer/boundary data rather than the primary
+  CCE claim.
 - Integrated Gemma3/Gemma4 report figures:
   `tools/plot_integrated_workstream_figures.py`
 - Follow-up research directions: `RESEARCH_DIRECTIONS.md`
 
 Headline retained results:
 
-- Cut Cross Entropy reduced Gemma3 270M EN-FR b16 train-step XLA peak memory
-  from 10.21 GiB to 2.21 GiB while keeping eval loss and BLEU essentially at
-  parity. Same-batch CCE steps were slower.
+- Cut Cross Entropy reduced Gemma3 270M OPUS100 EN-FR b16/L512 train-step XLA
+  planned HBM from 12.57 GiB/chip to 4.98 GiB/chip. The same-shape 5,000-step
+  run kept train/eval loss in the same band, while CCE increased mean step time
+  from 0.106s to 0.196s. Frontier sweeps on `v5litepod-1` show b64/L512 as a
+  CCE-only fit.
 - Sequence packing raised useful target-token throughput by 20x+ on short
   OPUS100 EN-FR SFT examples by removing padding waste.
 - Gemma3 Tiled MLP moved the 4B LoRA v5litepod-8 keypoint from Default MLP

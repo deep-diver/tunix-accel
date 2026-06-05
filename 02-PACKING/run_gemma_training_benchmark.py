@@ -921,6 +921,9 @@ def generate_translations(
     args: argparse.Namespace,
 ) -> list[dict[str, str]]:
   from tunix.generate import sampler as sampler_lib  # pylint: disable=import-outside-toplevel
+  from tunix_accel import model_adapters  # pylint: disable=import-outside-toplevel
+
+  model_adapters.restore_intercepted_lora_model(model)
 
   cache_config = sampler_lib.CacheConfig(
       cache_size=args.max_length + args.max_generation_steps,
