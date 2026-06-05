@@ -266,6 +266,30 @@ def load_opus100_records(
       "en-fr",
       split=f"train[:{args.num_examples}]",
   )
+  records = []
+  for idx, row in enumerate(dataset):
+    source, target = translation_pair(row)
+    records.append(
+        tokenize_sft_record(
+            encode=tokenizer_bundle.encode,
+            eos_id=tokenizer_bundle.eos_id,
+            source=source,
+            target=target,
+            example_id=idx,
+        )
+    )
+
+  return TokenizedSftDataset(
+      name="opus100-en-fr-gemma3-it",
+      model_id=args.model_id,
+      tokenizer_source=args.tokenizer_source,
+      pad_token_id=tokenizer_bundle.pad_id,
+      records=records,
+      source=(
+          "Helsinki-NLP/opus-100 en-fr train split, Tunix Gemma3 IT prompt "
+          "wrapper, target-only loss mask, target EOS"
+      ),
+  )
 
 
 def load_synthetic_records(
@@ -301,30 +325,6 @@ def load_synthetic_records(
       records=records,
       source=(
           "Deterministic synthetic EN-FR shaped text, Tunix Gemma prompt "
-          "wrapper, target-only loss mask, target EOS"
-      ),
-  )
-  records = []
-  for idx, row in enumerate(dataset):
-    source, target = translation_pair(row)
-    records.append(
-        tokenize_sft_record(
-            encode=tokenizer_bundle.encode,
-            eos_id=tokenizer_bundle.eos_id,
-            source=source,
-            target=target,
-            example_id=idx,
-        )
-    )
-
-  return TokenizedSftDataset(
-      name="opus100-en-fr-gemma3-it",
-      model_id=args.model_id,
-      tokenizer_source=args.tokenizer_source,
-      pad_token_id=tokenizer_bundle.pad_id,
-      records=records,
-      source=(
-          "Helsinki-NLP/opus-100 en-fr train split, Tunix Gemma3 IT prompt "
           "wrapper, target-only loss mask, target EOS"
       ),
   )

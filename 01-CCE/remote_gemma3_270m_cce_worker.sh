@@ -29,6 +29,7 @@ if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
   source "${VENV_DIR}/bin/activate"
   python -m pip install --upgrade pip setuptools wheel
   python -m pip install -r requirements.txt
+  python -m pip install pytest
   python -m pip install -U "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 else
   # shellcheck disable=SC1091
