@@ -113,6 +113,14 @@ def build_matched(rows: pd.DataFrame) -> pd.DataFrame:
         - matched["xla_train_step_gib_per_chip_cce"]
         / matched["xla_train_step_gib_per_chip_default"]
     ) * 100
+  if {"mean_step_time_sec_excl_first_default", "mean_step_time_sec_excl_first_cce"} <= set(matched.columns):
+    matched["step_time_multiplier_cce_vs_default"] = (
+        matched["mean_step_time_sec_excl_first_cce"]
+        / matched["mean_step_time_sec_excl_first_default"]
+    )
+    matched["step_time_overhead_pct"] = (
+        matched["step_time_multiplier_cce_vs_default"] - 1
+    ) * 100
   return matched.sort_values(["mesh_fsdp", "mesh_tp", "batch_size", "max_length"])
 
 
@@ -121,14 +129,27 @@ def context_label(value: float) -> str:
   return f"{value // 1024}K" if value >= 1024 else str(value)
 
 
+def context_rank(value: float) -> int:
+  value = int(value)
+  if value <= 0:
+    return 0
+  return {512: 1, 1024: 2, 2048: 3}.get(value, int(math.log2(value // 512)) + 1)
+
+
 def plot_mesh(rows: pd.DataFrame, summary: pd.DataFrame, matched: pd.DataFrame) -> None:
   if rows.empty or summary.empty:
     return
   ASSET_DIR.mkdir(parents=True, exist_ok=True)
-  fig, axes = plt.subplots(1, 2, figsize=(14.2, 5.2), constrained_layout=True)
+  fig, axes = plt.subplots(
+      1,
+      2,
+      figsize=(11.8, 3.9),
+      gridspec_kw={"width_ratios": [1.15, 1.0]},
+      constrained_layout=True,
+  )
   fig.suptitle(
       "Gemma3 270M CCE mesh generalization on TPU v5litepod-4 (4 chips)",
-      fontsize=14,
+      fontsize=12,
       fontweight="bold",
   )
 
@@ -148,7 +169,8 @@ def plot_mesh(rows: pd.DataFrame, summary: pd.DataFrame, matched: pd.DataFrame) 
   width = 0.36
   for idx, variant in enumerate(["default", "cce"]):
     part = summary[summary["variant"].eq(variant)].set_index("shape")
-    heights = [max(part.loc[shape, "max_ok_context"], 1) if shape in part.index else math.nan for shape in shape_order]
+    values = [part.loc[shape, "max_ok_context"] if shape in part.index else math.nan for shape in shape_order]
+    heights = [context_rank(value) if not math.isnan(value) else math.nan for value in values]
     offset = (-0.5 + idx) * width
     bars = ax.bar(
         [x + offset for x in x_base],
@@ -157,20 +179,20 @@ def plot_mesh(rows: pd.DataFrame, summary: pd.DataFrame, matched: pd.DataFrame) 
         color=VARIANT_COLOR[variant],
         label=VARIANT_LABEL[variant],
     )
-    for bar, height in zip(bars, heights, strict=True):
+    for bar, value, height in zip(bars, values, heights, strict=True):
       if math.isnan(height):
         continue
-      label = "none" if height <= 1 else context_label(height)
+      label = "none" if int(value) <= 0 else context_label(value)
       ax.text(
           bar.get_x() + bar.get_width() / 2,
-          height * 1.08,
+          height + 0.07,
           label,
           ha="center",
           va="bottom",
           fontsize=7,
       )
-  ax.set_yscale("log", base=2)
-  ax.set_yticks([1, 512, 1024, 2048])
+  ax.set_ylim(-0.2, 3.35)
+  ax.set_yticks([0, 1, 2, 3])
   ax.set_yticklabels(["none", "512", "1K", "2K"])
   ax.set_xticks(x_base)
   ax.set_xticklabels(shape_order, fontsize=8)
@@ -181,34 +203,62 @@ def plot_mesh(rows: pd.DataFrame, summary: pd.DataFrame, matched: pd.DataFrame) 
   ax.legend(frameon=False)
 
   ax = axes[1]
-  if not matched.empty and "xla_reduction_pct" in matched:
-    plot_data = matched.dropna(subset=["xla_reduction_pct"]).copy()
-    plot_data["shape"] = plot_data.apply(
-        lambda row: f"{row['mesh']} b{int(row['batch_size'])}/L{context_label(row['max_length'])}",
-        axis=1,
-    )
+  required = {"xla_reduction_pct", "step_time_multiplier_cce_vs_default"}
+  if not matched.empty and required <= set(matched.columns):
+    plot_data = matched.dropna(subset=list(required)).copy()
     plot_data = plot_data.sort_values(["mesh_fsdp", "mesh_tp", "batch_size", "max_length"])
-    bars = ax.bar(
-        range(len(plot_data)),
-        plot_data["xla_reduction_pct"],
-        color="#159A78",
-        alpha=0.88,
-    )
-    for bar, value in zip(bars, plot_data["xla_reduction_pct"], strict=True):
-      ax.text(
-          bar.get_x() + bar.get_width() / 2,
-          value + 1.5,
-          f"{value:.0f}%",
-          ha="center",
-          va="bottom",
-          fontsize=7,
+    mesh_colors = {
+        "fsdp1/tp4": "#2B6CB0",
+        "fsdp2/tp2": "#C05621",
+        "fsdp4/tp1": "#159A78",
+    }
+    for mesh, part in plot_data.groupby("mesh", sort=False):
+      ax.scatter(
+          part["xla_reduction_pct"],
+          part["step_time_multiplier_cce_vs_default"],
+          s=56,
+          color=mesh_colors.get(mesh, "#555555"),
+          label=mesh,
+          alpha=0.9,
+          edgecolor="white",
+          linewidth=0.7,
       )
-    ax.set_xticks(range(len(plot_data)))
-    ax.set_xticklabels(plot_data["shape"], rotation=35, ha="right", fontsize=8)
-    ax.set_ylabel("CCE per-chip XLA planned HBM reduction vs Default (%)")
-    ax.set_title("Matched passing shapes (both variants OK)")
+    mesh_ranges = (
+        plot_data.groupby("mesh")["step_time_multiplier_cce_vs_default"]
+        .agg(["min", "max"])
+        .to_dict("index")
+    )
+    label_positions = {
+        "fsdp1/tp4": (52.6, 1.85),
+        "fsdp2/tp2": (56.8, 105),
+        "fsdp4/tp1": (64.3, 2.35),
+    }
+    for mesh, (x_pos, y_pos) in label_positions.items():
+      if mesh not in mesh_ranges:
+        continue
+      low = mesh_ranges[mesh]["min"]
+      high = mesh_ranges[mesh]["max"]
+      value = f"{low:.1f}x" if abs(high - low) < 0.1 else f"{low:.1f}-{high:.1f}x"
+      ax.text(
+          x_pos,
+          y_pos,
+          f"{mesh}: {value}",
+          fontsize=7,
+          color=mesh_colors.get(mesh, "#333333"),
+          fontweight="bold",
+      )
+    ax.axhline(1.0, color="#777777", linewidth=0.8, linestyle="--")
+    ax.set_yscale("log", base=2)
+    ax.set_ylim(0.9, 140)
+    ax.set_yticks([1, 2, 4, 8, 16, 32, 64, 128])
+    ax.set_yticklabels(["1x", "2x", "4x", "8x", "16x", "32x", "64x", "128x"])
+    ax.set_xlim(48, 69)
+    ax.set_xlabel("CCE per-chip XLA planned HBM reduction vs Default (%)")
+    ax.set_ylabel("CCE step-time multiplier vs Default")
+    ax.set_title("Matched rows: memory saved vs CCE time cost")
     ax.set_axisbelow(True)
-    ax.grid(True, axis="y", color="#E6E6E6")
+    ax.grid(True, color="#E6E6E6")
+    ax.legend(frameon=False, fontsize=7, loc="upper left")
   else:
     ax.text(0.5, 0.5, "No matched passing rows yet", ha="center", va="center")
     ax.axis("off")

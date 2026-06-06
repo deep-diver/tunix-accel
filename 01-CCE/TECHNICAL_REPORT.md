@@ -172,14 +172,21 @@ The frontier also moved in each mesh:
 | `fsdp=1,tp=4` | 32 | 1024 | 2048 |
 | `fsdp=1,tp=4` | 64 | 512 | 1024 |
 
-The tradeoff is mesh-dependent. FSDP-only timing looked similar to the
-single-chip story: at b16/L512, step time moved from 0.238s to 0.413s. TP-heavy
-layouts were much slower in this small-model synthetic check; for example,
-`fsdp=1,tp=4` b32/L1024 moved from 22.8s to 30.7s, and `fsdp=2,tp=2` CCE rows
-were slower still. The clean interpretation is therefore: CCE is compatible
-with FSDP/TP sharding and still reduces per-chip memory, but mesh choice can
-dominate throughput. For Gemma3 270M, TP is useful as a compatibility stress
-test, not as the fastest training layout.
+The tradeoff is mesh-dependent, and the right panel separates CCE overhead from
+the base mesh cost by using matched rows where both variants completed. In the
+FSDP-only layout, CCE was about 1.7x slower at the matched b16/L512 shape. In
+the TP-only layout, CCE added a smaller 1.1-1.5x step-time multiplier across the
+matched rows, although the base TP layout itself was already slow for this small
+model. The mixed `fsdp=2,tp=2` layout is the outlier: matched CCE rows were
+about 80-89x slower than Default CE. That points to a poor interaction between
+the current CCE lowering and this particular sharding layout, not just to the
+generic cost of streaming cross entropy.
+
+The clean interpretation is therefore: CCE is compatible with FSDP/TP sharding
+and still reduces per-chip memory, but mesh choice can dominate throughput. For
+Gemma3 270M, TP is useful as a compatibility stress test, not as the fastest
+training layout; `fsdp=2,tp=2` should be treated as an optimization target
+rather than a recommended configuration.
 
 ## 5. Real EN-FR Training Parity
 
