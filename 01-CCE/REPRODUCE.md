@@ -1,9 +1,9 @@
 # Reproducing the Gemma CCE Rerun and Transfer Checks
 
 This guide reproduces the final 01-CCE package: the exhaustive Gemma3 270M CCE
-rerun plus the four-chip Gemma3 1B / Gemma4 E2B transfer checks. It
-intentionally keeps Packing, Tiled MLP, Activation Policy, and Splash Attention
-disabled.
+rerun, the four-chip Gemma3 1B / Gemma4 E2B transfer checks, and the focused
+eight-chip Gemma3 4B / Gemma4 E4B transfer checks. It intentionally keeps
+Packing, Tiled MLP, Activation Policy, and Splash Attention disabled.
 
 ## Retained Artifacts
 
@@ -23,6 +23,9 @@ Main report and figures:
 - `01-CCE/assets/gemma_cce_transfer_frontier.png`
 - `01-CCE/assets/gemma_cce_transfer_quality.png`
 - `01-CCE/assets/gemma_cce_transfer_chunk_mesh.png`
+- `01-CCE/assets/gemma_cce_large_transfer_frontier.png`
+- `01-CCE/assets/gemma_cce_large_transfer_pressure.png`
+- `01-CCE/assets/gemma_cce_large_transfer_chunk_tuning.png`
 
 Compact rerun data:
 
@@ -55,6 +58,10 @@ Compact rerun data:
 - `01-CCE/data/gemma_1b_e2b_cce_transfer/chunk_summary.csv`
 - `01-CCE/data/gemma_1b_e2b_cce_transfer/training_summary.csv`
 - `01-CCE/data/gemma_1b_e2b_cce_transfer/training_history.csv`
+- `01-CCE/data/gemma_4b_e4b_cce_transfer/frontier_summary.csv`
+- `01-CCE/data/gemma_4b_e4b_cce_transfer/matched_metrics.csv`
+- `01-CCE/data/gemma_4b_e4b_cce_transfer/pressure_points.csv`
+- `01-CCE/data/gemma_4b_e4b_cce_transfer/chunk_summary.csv`
 
 Compressed raw worker outputs:
 
@@ -65,6 +72,7 @@ Compressed raw worker outputs:
 - `01-CCE/data/gemma3_270m_4chip_chunk/raw_artifacts/*.tar.gz`
 - `01-CCE/data/gemma3_270m_4chip_quality/raw_artifacts/*.tar.gz`
 - `01-CCE/data/gemma_1b_e2b_cce_transfer/raw_artifacts/*.tar.gz`
+- `01-CCE/data/gemma_4b_e4b_cce_transfer/raw_artifacts/*.tar.gz`
 
 Do not commit extracted `raw/` directories. They are recreated by the collector
 scripts from the tarballs.
@@ -128,6 +136,8 @@ The mesh generalization check used the same project, zone, model, checkpoint,
 tokenizer, and image, but ran on Cloud TPU `v5litepod-4` with four chips.
 Gemma3 1B and Gemma4 E2B transfer checks also used `v5litepod-4`, four chips,
 with `fsdp=4,tp=1` as the primary mesh.
+Gemma3 4B and Gemma4 E4B focused transfer checks used `v5litepod-8`, eight
+chips, with `fsdp=8,tp=1`.
 
 Create one TPU VM per independent profile when you want maximum parallelism:
 
@@ -257,6 +267,31 @@ The matched OPUS100 transfer rows used direct `run_gemma3_270m_cce_sweep.py`
 commands because the matched safe shapes differ by model: Gemma3 1B used
 b8/L512, and Gemma4 E2B used b4/L256.
 
+For the focused eight-chip 4B/E4B checks, use the new worker profiles:
+
+```bash
+MODEL_SIZE=4b OUT_BASE=/tmp/gemma-cce-4b-focused \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh eightchip-frontier-fsdp8
+
+MODEL_SIZE=4b OUT_BASE=/tmp/gemma-cce-4b-focused \
+  CHUNK_BATCHES=4 CHUNK_CONTEXTS=1024 \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh eightchip-chunk-fsdp8
+
+MODEL_SIZE=e4b OUT_BASE=/tmp/gemma-cce-e4b-focused-hf3 \
+  TUNIX_ACCEL_MODEL_DOWNLOAD_PATH=/tmp/gemma-cce-e4b-focused-hf3/hf-cache/e4b \
+  FOCUSED_BATCHES=1,2,4,8 FOCUSED_CONTEXTS=256,512,1024,2048 \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh eightchip-frontier-fsdp8
+
+MODEL_SIZE=e4b OUT_BASE=/tmp/gemma-cce-e4b-focused-hf3 \
+  TUNIX_ACCEL_MODEL_DOWNLOAD_PATH=/tmp/gemma-cce-e4b-focused-hf3/hf-cache/e4b \
+  CHUNK_BATCHES=4 CHUNK_CONTEXTS=512 \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh eightchip-chunk-fsdp8
+```
+
+Gemma4 E4B uses Hugging Face loading in this package. Keep the Hugging Face
+token in `~/.cache/huggingface/token` or `HF_TOKEN`, and do not include the HF
+model cache in copied artifacts.
+
 ## Local Aggregation
 
 After all tarballs are copied into `raw_artifacts/`, run:
@@ -270,6 +305,7 @@ python3 01-CCE/collect_gemma3_270m_outlier_hlo_results.py
 python3 01-CCE/collect_gemma3_270m_4chip_chunk_results.py
 python3 01-CCE/collect_gemma3_270m_4chip_quality_results.py
 python3 01-CCE/collect_gemma_1b_e2b_cce_transfer_results.py
+python3 01-CCE/collect_gemma_4b_e4b_cce_transfer_results.py
 ```
 
 The collectors:
@@ -288,6 +324,8 @@ rm -rf 01-CCE/data/gemma3_270m_mesh_cce_repeat/raw
 rm -rf 01-CCE/data/gemma3_270m_4chip_frontier/raw
 rm -rf 01-CCE/data/gemma3_270m_4chip_chunk/raw
 rm -rf 01-CCE/data/gemma3_270m_4chip_quality/raw
+rm -rf 01-CCE/data/gemma_1b_e2b_cce_transfer/raw
+rm -rf 01-CCE/data/gemma_4b_e4b_cce_transfer/raw
 ```
 
 ## Expected Checks
@@ -307,6 +345,10 @@ The rerun should reproduce the following qualitative findings:
 - The repeated `fsdp=2,tp=2` default chunk row is a throughput outlier, but
   larger TPU chunk settings reduce b16/L512 from about 15.4s/step to about
   0.83s/step at the same 2.65 GiB/chip XLA HBM.
+- On `v5litepod-8`, Gemma3 4B b4/L1024 fails under Default CE at 16.54
+  GiB/chip planned HBM and completes under CCE at 15.04 GiB/chip.
+- On `v5litepod-8`, Gemma4 E4B b4/L512 and b8/L256 are CCE-only fits in the
+  focused frontier grid.
 
 Generation note: the CCE LoRA training hook intercepts hidden states in the
 loss path. Before sampling, call the restore path so Tunix generation sees the

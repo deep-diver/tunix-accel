@@ -4,7 +4,9 @@ This report makes one narrow, reproducible claim: on Gemma LoRA SFT with
 JAX/Tunix on Cloud TPU v5e, Cut Cross Entropy removes a real loss-logits memory
 wall without materially changing the training result. Gemma3 270M is the
 exhaustive base case. Gemma3 1B and Gemma4 E2B are transfer checks under the
-same four-chip FSDP setup, not a replacement for the deeper 270M sweep.
+same four-chip FSDP setup. Gemma3 4B and Gemma4 E4B are focused larger-model
+checks under an eight-chip FSDP setup, not a replacement for the deeper 270M
+sweep.
 
 ## Executive Summary
 
@@ -16,8 +18,8 @@ same four-chip FSDP setup, not a replacement for the deeper 270M sweep.
 | What is the tradeoff? | Same-shape training is slower. In the 5,000-step b16/L512 run, mean step time rose from 0.106s to 0.196s. |
 | Does it survive multi-chip mesh layouts? | Yes. A follow-up on `v5litepod-4` tested `fsdp=4,tp=1`, `fsdp=2,tp=2`, and `fsdp=1,tp=4`; matched passing rows showed 53-66% per-chip XLA planned HBM reduction and CCE moved the context frontier in all three meshes. |
 | Did multi-chip expose a throughput pitfall? | Yes. The repeated `fsdp=2,tp=2` default chunk row was a real outlier: b16/L512 CCE was about 97x slower than Default CE. Larger TPU chunk settings reduced that same row from 15.37s/step to 0.83s/step without increasing XLA HBM. |
-| Does the pattern transfer beyond 270M? | Yes for the tested FSDP-only rows. On `v5litepod-4`, Gemma3 1B b16 moved from L256 to L512 and b32 moved from no Default CE fit to L256. Gemma4 E2B b1 moved from L1024 to L2048, b4 from L256 to L512, and b8 from no Default CE fit to L256. |
-| What TPU was used? | The primary 270M rerun used Cloud TPU `v5litepod-1`, one chip, in `us-west4-a`. Mesh and transfer checks used `v5litepod-4`, four chips, in the same zone. |
+| Does the pattern transfer beyond 270M? | Yes for the tested FSDP-only rows. On `v5litepod-4`, Gemma3 1B b16 moved from L256 to L512 and b32 moved from no Default CE fit to L256; Gemma4 E2B b4 moved from L256 to L512. On `v5litepod-8`, Gemma3 4B b4 moved from L512 to L1024; Gemma4 E4B b4 moved from L256 to L512 and b8 moved from no Default CE fit to L256. |
+| What TPU was used? | The primary 270M rerun used Cloud TPU `v5litepod-1`, one chip, in `us-west4-a`. Mesh and 1B/E2B transfer checks used `v5litepod-4`, four chips. 4B/E4B focused transfer checks used `v5litepod-8`, eight chips. |
 
 The memory metric used throughout the new 270M plots is **max per-chip XLA
 buffer-assignment planned HBM**. This is the number that decides whether a TPU
@@ -34,9 +36,9 @@ The report supports four claims:
    train/eval loss in the same band.
 3. The drop-in Tunix patch works on both single-chip and four-chip Gemma3 270M
    LoRA jobs, but throughput depends on mesh layout and chunk policy.
-4. The same frontier pattern transfers to Gemma3 1B and Gemma4 E2B under the
-   tested four-chip FSDP setup, although those models have less exhaustive
-   coverage than the 270M base case.
+4. The same frontier pattern transfers to Gemma3 1B, Gemma4 E2B, Gemma3 4B,
+   and Gemma4 E4B under the tested FSDP-only setups, although those models have
+   less exhaustive coverage than the 270M base case.
 
 It does not claim that CCE is always faster, that CCE removes every memory wall,
 or that the OPUS100 samples establish translation quality. Those rows are sanity
@@ -89,6 +91,8 @@ The transfer checks reused the four-chip setup:
 | --- | --- | --- | --- |
 | Gemma3 1B | `v5litepod-4`, `fsdp=4,tp=1` primary; partial `fsdp=2,tp=2` | frontier grid, chunk grid | b8/L512, 1,000 steps |
 | Gemma4 E2B | `v5litepod-4`, `fsdp=4,tp=1` primary; TP-heavy probe only | frontier grid, chunk grid, mesh probe | b4/L256, 1,000 steps |
+| Gemma3 4B | `v5litepod-8`, `fsdp=8,tp=1` | focused frontier grid, CCE chunk grid | not run |
+| Gemma4 E4B | `v5litepod-8`, `fsdp=8,tp=1` | focused frontier grid, CCE chunk grid | not run |
 
 Those transfer rows are deliberately smaller than the 270M evidence package.
 Their purpose is to test whether the same memory/frontier story survives model
@@ -315,6 +319,45 @@ models should prefer FSDP-only unless there is a separate reason to pay for TP.
 
 ![Gemma CCE transfer chunk and mesh](./assets/gemma_cce_transfer_chunk_mesh.png)
 
+We then ran a focused larger-model transfer check on `v5litepod-8`,
+`fsdp=8,tp=1`. This was not another exhaustive sweep. It kept the same question
+as the transfer section: when the model is larger and the TPU has more chips, do
+we still see CCE opening shapes that Default CE cannot compile?
+
+![Gemma CCE larger transfer frontier](./assets/gemma_cce_large_transfer_frontier.png)
+
+The answer is yes, with the expected boundary: CCE helps when the failed shape is
+near the loss-logits wall. It does not magically make every batch/context pair
+fit.
+
+| Model | Batch | Default CE max context | CCE max context | Note |
+| --- | ---: | ---: | ---: | --- |
+| Gemma3 4B | 4 | 512 | 1024 | CCE-only fit at b4/L1024 |
+| Gemma4 E4B | 4 | 256 | 512 | CCE-only fit at b4/L512 |
+| Gemma4 E4B | 8 | none | 256 | CCE-only fit at b8/L256 |
+
+The pressure rows show the same story in the raw memory metric used throughout
+the report: max per-chip XLA buffer-assignment planned HBM.
+
+![Gemma CCE larger transfer pressure points](./assets/gemma_cce_large_transfer_pressure.png)
+
+| Model / shape | Default CE status | Default XLA HBM | CCE status | CCE XLA HBM |
+| --- | --- | ---: | --- | ---: |
+| Gemma3 4B b4/L1024 | compile failed | 16.54 GiB/chip | OK | 15.04 GiB/chip |
+| Gemma4 E4B b4/L512 | compile failed | 20.30 GiB/chip | OK | 14.53 GiB/chip |
+| Gemma4 E4B b8/L256 | compile failed | 18.66 GiB/chip | OK | 13.60 GiB/chip |
+
+The larger-model chunk tuning result is also useful, but more modest than the
+270M mixed-mesh outlier. At these FSDP-only pressure points, chunk choice mostly
+changes step time by a few percent while planned HBM stays in the same band.
+
+![Gemma CCE larger transfer chunk tuning](./assets/gemma_cce_large_transfer_chunk_tuning.png)
+
+| Model / shape | Conservative chunk | Conservative step | Fastest tested chunk | Fastest tested step | XLA HBM |
+| --- | --- | ---: | --- | ---: | ---: |
+| Gemma3 4B b4/L1024 | 128/8192 | 0.627s | 256/65536 | 0.588s | 14.93-15.04 GiB/chip |
+| Gemma4 E4B b4/L512 | 128/8192 | 0.634s | 512/16384 | 0.619s | 14.53-14.54 GiB/chip |
+
 The important practical rule is: use CCE to move the memory wall, then tune
 `token_chunk` and `vocab_chunk` on the exact model/mesh/shape you intend to run.
 The memory savings transfer, but the fastest chunk policy does not have to be
@@ -495,6 +538,18 @@ Gemma3 1B / Gemma4 E2B transfer package:
 - `01-CCE/assets/gemma_cce_transfer_frontier.png`
 - `01-CCE/assets/gemma_cce_transfer_quality.png`
 - `01-CCE/assets/gemma_cce_transfer_chunk_mesh.png`
+
+Gemma3 4B / Gemma4 E4B focused transfer package:
+
+- `01-CCE/data/gemma_4b_e4b_cce_transfer/run_manifest.csv`
+- `01-CCE/data/gemma_4b_e4b_cce_transfer/transfer_runs.csv`
+- `01-CCE/data/gemma_4b_e4b_cce_transfer/frontier_summary.csv`
+- `01-CCE/data/gemma_4b_e4b_cce_transfer/matched_metrics.csv`
+- `01-CCE/data/gemma_4b_e4b_cce_transfer/pressure_points.csv`
+- `01-CCE/data/gemma_4b_e4b_cce_transfer/chunk_summary.csv`
+- `01-CCE/assets/gemma_cce_large_transfer_frontier.png`
+- `01-CCE/assets/gemma_cce_large_transfer_pressure.png`
+- `01-CCE/assets/gemma_cce_large_transfer_chunk_tuning.png`
 
 Lower-level audit files are also kept beside those summaries, including
 `frontier_runs.csv`, `rank_sensitivity.csv`, `mesh_runs.csv`, `repeat_runs.csv`,

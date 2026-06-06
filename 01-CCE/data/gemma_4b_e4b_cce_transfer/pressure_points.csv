@@ -1,0 +1,4 @@
+model,batch_size,max_length,mesh,default_status,cce_status,default_xla_gib_per_chip,cce_xla_gib_per_chip,cce_step_time_sec,default_final_loss,cce_final_loss,tpu,chips
+Gemma3 4B,4,1024,fsdp8/tp1,failed,ok,16.54,15.04,0.7242994779999208,,1.9717028141021729,v5litepod-8,8
+Gemma4 E4B,4,512,fsdp8/tp1,failed,ok,20.3,14.53,0.7692859320013667,,1.4515726566314695,v5litepod-8,8
+Gemma4 E4B,8,256,fsdp8/tp1,failed,ok,18.66,13.6,0.757335330999922,,1.3046770095825195,v5litepod-8,8

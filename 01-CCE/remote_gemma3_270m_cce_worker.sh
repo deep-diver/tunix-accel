@@ -126,6 +126,77 @@ run_fourchip_frontier() {
     --outdir "${OUT_BASE}/${suite}"
 }
 
+run_eightchip_frontier() {
+  local suite="$1"
+  local fsdp="$2"
+  local tp="$3"
+  run_sweep \
+    --suite "${suite}" \
+    --variants "${FOCUSED_VARIANTS:-default,cce}" \
+    --batch-sizes "${FOCUSED_BATCHES:-1,2,4,8,16}" \
+    --contexts "${FOCUSED_CONTEXTS:-512,1024,2048,4096}" \
+    --lora-ranks "${FOCUSED_LORA_RANKS:-16}" \
+    --dataset-mode synthetic \
+    --num-examples "${FOCUSED_NUM_EXAMPLES:-4096}" \
+    --max-steps "${FOCUSED_MAX_STEPS:-2}" \
+    --skip-quality-eval \
+    --mesh-fsdp "${fsdp}" \
+    --mesh-tp "${tp}" \
+    --tpu v5litepod-8 \
+    --chips 8 \
+    --force \
+    --outdir "${OUT_BASE}/${suite}"
+}
+
+run_eightchip_chunk() {
+  local suite="$1"
+  local fsdp="$2"
+  local tp="$3"
+  run_sweep \
+    --suite "${suite}" \
+    --variants cce \
+    --batch-sizes "${CHUNK_BATCHES:-4}" \
+    --contexts "${CHUNK_CONTEXTS:-1024}" \
+    --lora-ranks "${FOCUSED_LORA_RANKS:-16}" \
+    --token-chunks "${CHUNK_TOKEN_CHUNKS:-128,256,512}" \
+    --vocab-chunks "${CHUNK_VOCAB_CHUNKS:-8192,16384,32768,65536}" \
+    --dataset-mode synthetic \
+    --num-examples "${FOCUSED_NUM_EXAMPLES:-2048}" \
+    --max-steps "${CHUNK_MAX_STEPS:-4}" \
+    --skip-quality-eval \
+    --mesh-fsdp "${fsdp}" \
+    --mesh-tp "${tp}" \
+    --tpu v5litepod-8 \
+    --chips 8 \
+    --force \
+    --outdir "${OUT_BASE}/${suite}"
+}
+
+run_eightchip_quality() {
+  local suite="$1"
+  local variant="$2"
+  local fsdp="$3"
+  local tp="$4"
+  run_sweep \
+    --suite "${suite}" \
+    --variants "${variant}" \
+    --batch-sizes "${QUALITY_BATCHES:-4}" \
+    --contexts "${QUALITY_CONTEXTS:-512}" \
+    --lora-ranks "${FOCUSED_LORA_RANKS:-16}" \
+    --dataset-mode opus100 \
+    --num-examples "${QUALITY_NUM_EXAMPLES:-4096}" \
+    --max-steps "${QUALITY_MAX_STEPS:-1000}" \
+    --eval-examples 128 \
+    --eval-batches 8 \
+    --generation-examples 0 \
+    --mesh-fsdp "${fsdp}" \
+    --mesh-tp "${tp}" \
+    --tpu v5litepod-8 \
+    --chips 8 \
+    --force \
+    --outdir "${OUT_BASE}/${suite}"
+}
+
 run_outlier_hlo_mesh() {
   local suite="$1"
   local fsdp="$2"
@@ -438,6 +509,29 @@ case "${PROFILE}" in
 
   fourchip-quality-fsdp4-cce)
     run_fourchip_quality quality_4chip_fsdp4_cce_b16_l512 cce 4 1
+    ;;
+
+  eightchip-pilot-fsdp8)
+    FOCUSED_BATCHES="${FOCUSED_BATCHES:-1,4}" \
+    FOCUSED_CONTEXTS="${FOCUSED_CONTEXTS:-512}" \
+    FOCUSED_MAX_STEPS="${FOCUSED_MAX_STEPS:-2}" \
+      run_eightchip_frontier focused_pilot_fsdp8_tp1 8 1
+    ;;
+
+  eightchip-frontier-fsdp8)
+    run_eightchip_frontier focused_frontier_fsdp8_tp1 8 1
+    ;;
+
+  eightchip-chunk-fsdp8)
+    run_eightchip_chunk focused_chunk_fsdp8_tp1 8 1
+    ;;
+
+  eightchip-quality-fsdp8-default)
+    run_eightchip_quality focused_quality_fsdp8_default default 8 1
+    ;;
+
+  eightchip-quality-fsdp8-cce)
+    run_eightchip_quality focused_quality_fsdp8_cce cce 8 1
     ;;
 
   *)

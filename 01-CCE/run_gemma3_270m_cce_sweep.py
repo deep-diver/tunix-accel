@@ -52,9 +52,29 @@ MODEL_PRESETS = {
         "allow_download": False,
         "enable_gemma4_hf_loader": False,
     },
+    "4b": {
+        "label": "Gemma3 4B",
+        "model_id": "google/gemma-3-4b-it",
+        "model_source": "gcs",
+        "model_path": "gs://gemma-data/checkpoints/gemma3-4b-it",
+        "tokenizer_source": "sentencepiece",
+        "tokenizer_path": "gs://gemma-data/tokenizers/tokenizer_gemma3.model",
+        "allow_download": False,
+        "enable_gemma4_hf_loader": False,
+    },
     "e2b": {
         "label": "Gemma4 E2B",
         "model_id": "google/gemma-4-E2B",
+        "model_source": "huggingface",
+        "model_path": "",
+        "tokenizer_source": "huggingface",
+        "tokenizer_path": "",
+        "allow_download": True,
+        "enable_gemma4_hf_loader": True,
+    },
+    "e4b": {
+        "label": "Gemma4 E4B",
+        "model_id": "google/gemma-4-E4B",
         "model_source": "huggingface",
         "model_path": "",
         "tokenizer_source": "huggingface",
@@ -553,7 +573,7 @@ def resolve_model_args(args: argparse.Namespace) -> None:
   )
   args.allow_download = bool(args.allow_download or preset["allow_download"])
   args.enable_gemma4_hf_loader = bool(preset["enable_gemma4_hf_loader"])
-  if args.model_size == "e2b" and not args.model_download_path:
+  if args.model_source == "huggingface" and not args.model_download_path:
     shared_cache = os.environ.get("TUNIX_ACCEL_MODEL_DOWNLOAD_PATH")
     if shared_cache:
       args.model_download_path = shared_cache

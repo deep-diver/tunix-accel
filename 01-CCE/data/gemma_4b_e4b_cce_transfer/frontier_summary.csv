@@ -1,0 +1,19 @@
+model,batch_size,variant,max_ok_context,first_failed_context,ok_rows,failed_rows,mesh,tpu,chips
+Gemma3 4B,1,cce,2048,4096,3,1,fsdp8/tp1,v5litepod-8,8
+Gemma3 4B,1,default,2048,4096,3,1,fsdp8/tp1,v5litepod-8,8
+Gemma3 4B,2,cce,1024,2048,2,2,fsdp8/tp1,v5litepod-8,8
+Gemma3 4B,2,default,1024,2048,2,2,fsdp8/tp1,v5litepod-8,8
+Gemma3 4B,4,cce,1024,2048,2,2,fsdp8/tp1,v5litepod-8,8
+Gemma3 4B,4,default,512,1024,1,3,fsdp8/tp1,v5litepod-8,8
+Gemma3 4B,8,cce,512,1024,1,3,fsdp8/tp1,v5litepod-8,8
+Gemma3 4B,8,default,512,1024,1,3,fsdp8/tp1,v5litepod-8,8
+Gemma3 4B,16,cce,0,512,0,4,fsdp8/tp1,v5litepod-8,8
+Gemma3 4B,16,default,0,512,0,4,fsdp8/tp1,v5litepod-8,8
+Gemma4 E4B,1,cce,1024,2048,3,1,fsdp8/tp1,v5litepod-8,8
+Gemma4 E4B,1,default,1024,2048,3,1,fsdp8/tp1,v5litepod-8,8
+Gemma4 E4B,2,cce,512,1024,2,2,fsdp8/tp1,v5litepod-8,8
+Gemma4 E4B,2,default,512,1024,2,2,fsdp8/tp1,v5litepod-8,8
+Gemma4 E4B,4,cce,512,1024,2,2,fsdp8/tp1,v5litepod-8,8
+Gemma4 E4B,4,default,256,512,1,3,fsdp8/tp1,v5litepod-8,8
+Gemma4 E4B,8,cce,256,512,1,3,fsdp8/tp1,v5litepod-8,8
+Gemma4 E4B,8,default,0,256,0,4,fsdp8/tp1,v5litepod-8,8

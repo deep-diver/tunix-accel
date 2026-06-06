@@ -1,0 +1,7 @@
+artifact,bytes,profile,tpu,chips,project,zone
+data/gemma_4b_e4b_cce_transfer/raw_artifacts/gemma-cce-4b-focused-eightchip-chunk-fsdp8.tar.gz,4389912,gemma-cce-4b-focused-eightchip-chunk-fsdp8,v5litepod-8,8,gcp-ml-172005,us-west4-a
+data/gemma_4b_e4b_cce_transfer/raw_artifacts/gemma-cce-4b-focused-eightchip-frontier-fsdp8.tar.gz,2966151,gemma-cce-4b-focused-eightchip-frontier-fsdp8,v5litepod-8,8,gcp-ml-172005,us-west4-a
+data/gemma_4b_e4b_cce_transfer/raw_artifacts/gemma-cce-4b-focused-eightchip-pilot-fsdp8.tar.gz,481239,gemma-cce-4b-focused-eightchip-pilot-fsdp8,v5litepod-8,8,gcp-ml-172005,us-west4-a
+data/gemma_4b_e4b_cce_transfer/raw_artifacts/gemma-cce-e4b-focused-hf3-eightchip-chunk-fsdp8.tar.gz,4806007,gemma-cce-e4b-focused-hf3-eightchip-chunk-fsdp8,v5litepod-8,8,gcp-ml-172005,us-west4-a
+data/gemma_4b_e4b_cce_transfer/raw_artifacts/gemma-cce-e4b-focused-hf3-eightchip-frontier-fsdp8.tar.gz,3141101,gemma-cce-e4b-focused-hf3-eightchip-frontier-fsdp8,v5litepod-8,8,gcp-ml-172005,us-west4-a
+data/gemma_4b_e4b_cce_transfer/raw_artifacts/gemma-cce-e4b-focused-hf3-eightchip-pilot-fsdp8.tar.gz,458307,gemma-cce-e4b-focused-hf3-eightchip-pilot-fsdp8,v5litepod-8,8,gcp-ml-172005,us-west4-a

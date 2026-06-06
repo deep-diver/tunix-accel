@@ -26,6 +26,8 @@ larger-model transfer checks are considered.
   collector.
 - `collect_gemma_1b_e2b_cce_transfer_results.py`: Gemma3 1B and Gemma4 E2B
   transfer-check collector.
+- `collect_gemma_4b_e4b_cce_transfer_results.py`: focused Gemma3 4B and
+  Gemma4 E4B eight-chip transfer-check collector.
 - `assets/`: final plots used by the report.
 - `data/`: compact CSV/JSONL summaries retained from the experiments,
   including the Gemma4 base boundary rows.
@@ -56,6 +58,9 @@ The current primary evidence package is:
   - `assets/gemma_cce_transfer_frontier.png`
   - `assets/gemma_cce_transfer_quality.png`
   - `assets/gemma_cce_transfer_chunk_mesh.png`
+  - `assets/gemma_cce_large_transfer_frontier.png`
+  - `assets/gemma_cce_large_transfer_pressure.png`
+  - `assets/gemma_cce_large_transfer_chunk_tuning.png`
 
 The primary rerun rows used Cloud TPU `v5litepod-1`, one chip, in
 `us-west4-a`. The mesh generalization check used `v5litepod-4`, four chips, in
@@ -76,6 +81,9 @@ Mesh check data:
 - `data/gemma_1b_e2b_cce_transfer/frontier_summary.csv`
 - `data/gemma_1b_e2b_cce_transfer/training_summary.csv`
 - `data/gemma_1b_e2b_cce_transfer/chunk_summary.csv`
+- `data/gemma_4b_e4b_cce_transfer/frontier_summary.csv`
+- `data/gemma_4b_e4b_cce_transfer/pressure_points.csv`
+- `data/gemma_4b_e4b_cce_transfer/chunk_summary.csv`
 
 The extracted `data/gemma3_270m_full_cce/raw/` directory is disposable and
 should not be committed. Recreate it from `raw_artifacts/*.tar.gz` with:
@@ -89,6 +97,7 @@ python3 01-CCE/collect_gemma3_270m_outlier_hlo_results.py
 python3 01-CCE/collect_gemma3_270m_4chip_chunk_results.py
 python3 01-CCE/collect_gemma3_270m_4chip_quality_results.py
 python3 01-CCE/collect_gemma_1b_e2b_cce_transfer_results.py
+python3 01-CCE/collect_gemma_4b_e4b_cce_transfer_results.py
 ```
 
 ## Gemma3 1B / Gemma4 E2B Transfer Package
@@ -104,6 +113,20 @@ four-chip FSDP setup. It used Cloud TPU `v5litepod-4`, four chips, in
   - `assets/gemma_cce_transfer_frontier.png`
   - `assets/gemma_cce_transfer_quality.png`
   - `assets/gemma_cce_transfer_chunk_mesh.png`
+
+## Gemma3 4B / Gemma4 E4B Focused Transfer Package
+
+The larger-model focused transfer package asks whether the same CCE memory-wall
+pattern survives on an eight-chip FSDP-only setup. It used Cloud TPU
+`v5litepod-8`, eight chips, in `us-west4-a`, with `fsdp=8,tp=1`.
+
+- Data: `data/gemma_4b_e4b_cce_transfer/`
+- Raw artifacts:
+  `data/gemma_4b_e4b_cce_transfer/raw_artifacts/*.tar.gz`
+- Figures:
+  - `assets/gemma_cce_large_transfer_frontier.png`
+  - `assets/gemma_cce_large_transfer_pressure.png`
+  - `assets/gemma_cce_large_transfer_chunk_tuning.png`
 
 ## Gemma4 Rows
 
