@@ -21,6 +21,7 @@ GEMMA3_TARGET_MODULE = "tunix.models.gemma3.model"
 GEMMA4_TARGET_MODULE = "tunix.models.gemma4.model"
 ENV_DISABLE = "TUNIX_ACCEL_DISABLE_AUTOPATCH"
 ENV_DISABLE_CE = "TUNIX_ACCEL_DISABLE_CE"
+ENV_CE_PRESET = "TUNIX_ACCEL_CE_PRESET"
 ENV_TOKEN_CHUNK = "TUNIX_ACCEL_CE_TOKEN_CHUNK"
 ENV_VOCAB_CHUNK = "TUNIX_ACCEL_CE_VOCAB_CHUNK"
 ENV_DISABLE_TILED_MLP = "TUNIX_ACCEL_DISABLE_TILED_MLP"
@@ -36,6 +37,12 @@ ENV_ACTIVATION_OFFLOAD_SRC = "TUNIX_ACCEL_ACTIVATION_OFFLOAD_SRC"
 ENV_ACTIVATION_OFFLOAD_DST = "TUNIX_ACCEL_ACTIVATION_OFFLOAD_DST"
 DEFAULT_TOKEN_CHUNK = 128
 DEFAULT_VOCAB_CHUNK = 8192
+CE_CHUNK_PRESETS = {
+    "default": (DEFAULT_TOKEN_CHUNK, DEFAULT_VOCAB_CHUNK),
+    "portable": (DEFAULT_TOKEN_CHUNK, DEFAULT_VOCAB_CHUNK),
+    "tpu_large_chunks": (512, 65536),
+    "tpu-large-chunks": (512, 65536),
+}
 DEFAULT_TILED_MLP_TOKEN_CHUNK = 128
 DEFAULT_TILED_MLP_LORA_ALPHA = 32.0
 DEFAULT_ACTIVATION_POLICY = "none"
@@ -60,26 +67,33 @@ def _env_bool(name: str, *, default: bool) -> bool:
   return default
 
 
+def _ce_preset_chunks() -> tuple[int, int]:
+  preset = os.environ.get(ENV_CE_PRESET, "default").strip().lower()
+  return CE_CHUNK_PRESETS.get(preset, CE_CHUNK_PRESETS["default"])
+
+
 def _token_chunk_from_env() -> int:
+  preset_token_chunk, _ = _ce_preset_chunks()
   raw = os.environ.get(ENV_TOKEN_CHUNK)
   if not raw:
-    return DEFAULT_TOKEN_CHUNK
+    return preset_token_chunk
   try:
     token_chunk = int(raw)
   except ValueError:
-    return DEFAULT_TOKEN_CHUNK
-  return token_chunk if token_chunk > 0 else DEFAULT_TOKEN_CHUNK
+    return preset_token_chunk
+  return token_chunk if token_chunk > 0 else preset_token_chunk
 
 
 def _vocab_chunk_from_env() -> int:
+  _, preset_vocab_chunk = _ce_preset_chunks()
   raw = os.environ.get(ENV_VOCAB_CHUNK)
   if not raw:
-    return DEFAULT_VOCAB_CHUNK
+    return preset_vocab_chunk
   try:
     vocab_chunk = int(raw)
   except ValueError:
-    return DEFAULT_VOCAB_CHUNK
-  return vocab_chunk if vocab_chunk > 0 else DEFAULT_VOCAB_CHUNK
+    return preset_vocab_chunk
+  return vocab_chunk if vocab_chunk > 0 else preset_vocab_chunk
 
 
 def _tiled_mlp_token_chunk_from_env() -> int:

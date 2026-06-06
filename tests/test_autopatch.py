@@ -16,6 +16,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def _run_python(code: str, *, env: dict[str, str] | None = None) -> str:
   run_env = os.environ.copy()
   run_env.pop("TUNIX_ACCEL_DISABLE_AUTOPATCH", None)
+  run_env.pop("TUNIX_ACCEL_DISABLE_CE", None)
+  run_env.pop("TUNIX_ACCEL_CE_PRESET", None)
+  run_env.pop("TUNIX_ACCEL_CE_TOKEN_CHUNK", None)
+  run_env.pop("TUNIX_ACCEL_CE_VOCAB_CHUNK", None)
   run_env.pop("TUNIX_ACCEL_DISABLE_TILED_MLP", None)
   run_env.pop("TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY", None)
   run_env.pop("TUNIX_ACCEL_ACTIVATION_POLICY", None)
@@ -76,6 +80,46 @@ def test_disabling_ce_does_not_disable_gemma3_tiled_mlp() -> None:
       env={"TUNIX_ACCEL_DISABLE_CE": "1"},
   )
   assert output.endswith("ce_disabled_gemma3_tiled_mlp_autopatch=ok")
+
+
+def test_cce_autopatch_reads_tpu_large_chunks_preset() -> None:
+  output = _run_python(
+      """
+      from tunix.sft import peft_trainer  # noqa: F401
+      from tunix_accel import tunix_patch
+
+      assert tunix_patch.is_installed()
+      assert tunix_patch._STATE.token_chunk == 512
+      assert tunix_patch._STATE.vocab_chunk == 65536
+      print("cce_tpu_large_chunks_preset=ok")
+      """,
+      env={
+          "TUNIX_ACCEL_DISABLE_TILED_MLP": "1",
+          "TUNIX_ACCEL_CE_PRESET": "tpu_large_chunks",
+      },
+  )
+  assert output.endswith("cce_tpu_large_chunks_preset=ok")
+
+
+def test_cce_explicit_chunks_override_preset() -> None:
+  output = _run_python(
+      """
+      from tunix.sft import peft_trainer  # noqa: F401
+      from tunix_accel import tunix_patch
+
+      assert tunix_patch.is_installed()
+      assert tunix_patch._STATE.token_chunk == 256
+      assert tunix_patch._STATE.vocab_chunk == 32768
+      print("cce_explicit_chunks_override_preset=ok")
+      """,
+      env={
+          "TUNIX_ACCEL_DISABLE_TILED_MLP": "1",
+          "TUNIX_ACCEL_CE_PRESET": "tpu_large_chunks",
+          "TUNIX_ACCEL_CE_TOKEN_CHUNK": "256",
+          "TUNIX_ACCEL_CE_VOCAB_CHUNK": "32768",
+      },
+  )
+  assert output.endswith("cce_explicit_chunks_override_preset=ok")
 
 
 def test_gemma3_activation_policy_autopatch_reads_policy_env() -> None:

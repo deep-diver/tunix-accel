@@ -66,6 +66,109 @@ run_mesh_sweep() {
     --outdir "${OUT_BASE}/${suite}"
 }
 
+run_mesh_repeat() {
+  local suite_prefix="$1"
+  local fsdp="$2"
+  local tp="$3"
+  local repeat="$4"
+  run_sweep \
+    --suite "${suite_prefix}_repeat${repeat}" \
+    --variants default,cce \
+    --batch-sizes 16,32 \
+    --contexts 512,1024 \
+    --lora-ranks 16 \
+    --dataset-mode synthetic \
+    --num-examples 2048 \
+    --max-steps 8 \
+    --skip-quality-eval \
+    --mesh-fsdp "${fsdp}" \
+    --mesh-tp "${tp}" \
+    --tpu v5litepod-4 \
+    --chips 4 \
+    --seed "${repeat}" \
+    --force \
+    --outdir "${OUT_BASE}/${suite_prefix}_repeat${repeat}"
+}
+
+run_mesh_repeat_family() {
+  local suite_prefix="$1"
+  local fsdp="$2"
+  local tp="$3"
+  run_mesh_repeat "${suite_prefix}" "${fsdp}" "${tp}" 1
+  run_mesh_repeat "${suite_prefix}" "${fsdp}" "${tp}" 2
+  run_mesh_repeat "${suite_prefix}" "${fsdp}" "${tp}" 3
+}
+
+run_fourchip_frontier() {
+  local suite="$1"
+  local fsdp="$2"
+  local tp="$3"
+  run_sweep \
+    --suite "${suite}" \
+    --variants default,cce \
+    --batch-sizes 1,4,8,16,32,64,128 \
+    --contexts 256,512,1024,2048,4096 \
+    --lora-ranks 16 \
+    --dataset-mode synthetic \
+    --num-examples 4096 \
+    --max-steps 2 \
+    --skip-quality-eval \
+    --mesh-fsdp "${fsdp}" \
+    --mesh-tp "${tp}" \
+    --tpu v5litepod-4 \
+    --chips 4 \
+    --force \
+    --outdir "${OUT_BASE}/${suite}"
+}
+
+run_outlier_hlo_mesh() {
+  local suite="$1"
+  local fsdp="$2"
+  local tp="$3"
+  run_sweep \
+    --suite "${suite}" \
+    --variants default,cce \
+    --batch-sizes 16 \
+    --contexts 512,1024 \
+    --lora-ranks 16 \
+    --dataset-mode synthetic \
+    --num-examples 1024 \
+    --max-steps 2 \
+    --skip-quality-eval \
+    --mesh-fsdp "${fsdp}" \
+    --mesh-tp "${tp}" \
+    --tpu v5litepod-4 \
+    --chips 4 \
+    --keep-all-xla \
+    --force \
+    --outdir "${OUT_BASE}/${suite}"
+}
+
+run_fourchip_quality() {
+  local suite="$1"
+  local variant="$2"
+  local fsdp="$3"
+  local tp="$4"
+  run_sweep \
+    --suite "${suite}" \
+    --variants "${variant}" \
+    --batch-sizes 16 \
+    --contexts 512 \
+    --lora-ranks 16 \
+    --dataset-mode opus100 \
+    --num-examples 4096 \
+    --max-steps 1000 \
+    --eval-examples 128 \
+    --eval-batches 8 \
+    --generation-examples 0 \
+    --mesh-fsdp "${fsdp}" \
+    --mesh-tp "${tp}" \
+    --tpu v5litepod-4 \
+    --chips 4 \
+    --force \
+    --outdir "${OUT_BASE}/${suite}"
+}
+
 case "${PROFILE}" in
   parity)
     python -m pytest -q \
@@ -226,6 +329,70 @@ case "${PROFILE}" in
 
   mesh-tp4)
     run_mesh_sweep mesh_fsdp1_tp4 1 4
+    ;;
+
+  mesh-2x2-repeat)
+    run_mesh_repeat_family mesh_fsdp2_tp2 2 2
+    ;;
+
+  mesh-fsdp4-repeat)
+    run_mesh_repeat_family mesh_fsdp4_tp1 4 1
+    ;;
+
+  mesh-tp4-repeat)
+    run_mesh_repeat_family mesh_fsdp1_tp4 1 4
+    ;;
+
+  mesh-repeat-rest)
+    run_mesh_repeat_family mesh_fsdp4_tp1 4 1
+    run_mesh_repeat_family mesh_fsdp1_tp4 1 4
+    ;;
+
+  fourchip-frontier-fsdp4)
+    run_fourchip_frontier fourchip_frontier_fsdp4_tp1 4 1
+    ;;
+
+  fourchip-frontier-2x2)
+    run_fourchip_frontier fourchip_frontier_fsdp2_tp2 2 2
+    ;;
+
+  fourchip-frontier-tp4)
+    run_fourchip_frontier fourchip_frontier_fsdp1_tp4 1 4
+    ;;
+
+  outlier-hlo)
+    run_outlier_hlo_mesh outlier_hlo_fsdp4_tp1 4 1
+    run_outlier_hlo_mesh outlier_hlo_fsdp2_tp2 2 2
+    run_outlier_hlo_mesh outlier_hlo_fsdp1_tp4 1 4
+    ;;
+
+  fourchip-chunk-2x2)
+    run_sweep \
+      --suite fourchip_chunk_fsdp2_tp2_b16_l512 \
+      --variants cce \
+      --batch-sizes 16 \
+      --contexts 512 \
+      --lora-ranks 16 \
+      --token-chunks 64,128,256,512 \
+      --vocab-chunks 4096,8192,16384,32768 \
+      --dataset-mode synthetic \
+      --num-examples 1024 \
+      --max-steps 4 \
+      --skip-quality-eval \
+      --mesh-fsdp 2 \
+      --mesh-tp 2 \
+      --tpu v5litepod-4 \
+      --chips 4 \
+      --force \
+      --outdir "${OUT_BASE}/fourchip_chunk_fsdp2_tp2_b16_l512"
+    ;;
+
+  fourchip-quality-fsdp4-default)
+    run_fourchip_quality quality_4chip_fsdp4_default_b16_l512 default 4 1
+    ;;
+
+  fourchip-quality-fsdp4-cce)
+    run_fourchip_quality quality_4chip_fsdp4_cce_b16_l512 cce 4 1
     ;;
 
   *)

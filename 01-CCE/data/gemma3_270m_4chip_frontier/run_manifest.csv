@@ -1,0 +1,4 @@
+artifact,bytes,profile,tpu,chips,project,zone,model
+data/gemma3_270m_4chip_frontier/raw_artifacts/gemma3-270m-cce-4chip-frontier-fourchip-frontier-2x2.tar.gz,6160232,gemma3-270m-cce-4chip-frontier-fourchip-frontier-2x2,v5litepod-4,4,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
+data/gemma3_270m_4chip_frontier/raw_artifacts/gemma3-270m-cce-4chip-frontier-fourchip-frontier-fsdp4.tar.gz,5261052,gemma3-270m-cce-4chip-frontier-fourchip-frontier-fsdp4,v5litepod-4,4,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
+data/gemma3_270m_4chip_frontier/raw_artifacts/gemma3-270m-cce-4chip-frontier-fourchip-frontier-tp4.tar.gz,13376213,gemma3-270m-cce-4chip-frontier-fourchip-frontier-tp4,v5litepod-4,4,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it

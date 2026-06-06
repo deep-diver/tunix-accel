@@ -1,0 +1,3 @@
+artifact,bytes,profile,tpu,chips,project,zone,model,mesh,repeats
+data/gemma3_270m_mesh_cce_repeat/raw_artifacts/gemma3-270m-cce-mesh-repeat-mesh-2x2-repeat.tar.gz,2598063,gemma3-270m-cce-mesh-repeat-mesh-2x2-repeat,v5litepod-4,4,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it,fsdp/tp repeat grid,3
+data/gemma3_270m_mesh_cce_repeat/raw_artifacts/gemma3-270m-cce-mesh-repeat-mesh-repeat-rest.tar.gz,5080622,gemma3-270m-cce-mesh-repeat-mesh-repeat-rest,v5litepod-4,4,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it,fsdp/tp repeat grid,3

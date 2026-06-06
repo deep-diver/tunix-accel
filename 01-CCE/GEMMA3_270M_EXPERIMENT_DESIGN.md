@@ -9,11 +9,19 @@ under:
 
 - `01-CCE/data/gemma3_270m_full_cce/`
 - `01-CCE/data/gemma3_270m_mesh_cce/`
+- `01-CCE/data/gemma3_270m_mesh_cce_repeat/`
+- `01-CCE/data/gemma3_270m_4chip_frontier/`
+- `01-CCE/data/gemma3_270m_4chip_chunk/`
+- `01-CCE/data/gemma3_270m_4chip_quality/`
 - `01-CCE/assets/gemma3_270m_cce_frontier.png`
 - `01-CCE/assets/gemma3_270m_cce_status_heatmap.png`
 - `01-CCE/assets/gemma3_270m_cce_tuning.png`
 - `01-CCE/assets/gemma3_270m_cce_quality.png`
-- `01-CCE/assets/gemma3_270m_cce_mesh_generalization.png`
+- `01-CCE/assets/gemma3_270m_cce_mesh_2x2_repeat.png`
+- `01-CCE/assets/gemma3_270m_cce_4chip_frontier.png`
+- `01-CCE/assets/gemma3_270m_cce_4chip_chunk_tuning.png`
+- `01-CCE/assets/gemma3_270m_cce_4chip_chunk_axis_ablation.png`
+- `01-CCE/assets/gemma3_270m_cce_4chip_quality.png`
 
 The final narrative is `01-CCE/TECHNICAL_REPORT.md`, and reproduction steps are
 in `01-CCE/REPRODUCE.md`.

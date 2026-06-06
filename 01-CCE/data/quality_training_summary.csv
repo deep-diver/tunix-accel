@@ -1,3 +1,0 @@
-name,label,run_id,variant,status,batch_size,max_length,steps,rank,learning_rate,tpu,chips,final_train_loss,final_eval_loss,train_step_avg_s,train_step_max_s,train_step_profile_count,tokens_per_step,tokens_per_second,xla_train_step_peak_gib,bleu,chrf,checkpoint_steps
-default_b16,Default CE b16,opus5000-default-20260602,default-lora,ok,16,512,5000,16,0.0002,v5litepod-1,1,1.932682991,1.680377483,0.09234066666666667,0.112132,6,8192,88714.97570590061,10.213928699493408,22.294260710991292,50.75219566548833,"2862,4463,5000"
-cce_b16,CCE b16,opus5000-cce-20260602,cce-lora,ok,16,512,5000,16,0.0002,v5litepod-1,1,1.955043316,1.680899143,0.1600615,0.196101,6,8192,51180.32756159351,2.214850425720215,22.288800751834057,50.270075328310824,"3424,4343,5000"

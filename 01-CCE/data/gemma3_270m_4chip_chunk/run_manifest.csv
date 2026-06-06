@@ -1,0 +1,3 @@
+artifact,bytes,profile,tpu,chips,project,zone,model
+data/gemma3_270m_4chip_chunk/raw_artifacts/gemma3-270m-cce-4chip-chunk-fourchip-chunk-2x2.tar.gz,1889606,gemma3-270m-cce-4chip-chunk-fourchip-chunk-2x2,v5litepod-4,4,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
+data/gemma3_270m_4chip_chunk/raw_artifacts/gemma3-270m-cce-impl-chunk-candidate.tar.gz,482880,gemma3-270m-cce-impl-chunk-candidate,v5litepod-4,4,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it

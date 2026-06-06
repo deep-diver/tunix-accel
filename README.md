@@ -42,6 +42,7 @@ site-packages so the drop-in patches still load there.
 ## Cut Cross Entropy Controls
 
 ```bash
+export TUNIX_ACCEL_CE_PRESET=tpu_large_chunks
 export TUNIX_ACCEL_CE_TOKEN_CHUNK=128
 export TUNIX_ACCEL_CE_VOCAB_CHUNK=8192
 export TUNIX_ACCEL_DISABLE_CE=1
@@ -51,6 +52,12 @@ export TUNIX_ACCEL_DISABLE_AUTOPATCH=1
 Use `TUNIX_ACCEL_DISABLE_CE=1` for a Default CE baseline while keeping other
 autopatches available. Use `TUNIX_ACCEL_DISABLE_AUTOPATCH=1` to disable all
 automatic patches.
+
+The default CCE chunks remain conservative: `128/8192`. On TPU mixed-mesh runs
+where the default chunking becomes a throughput bottleneck, use
+`TUNIX_ACCEL_CE_PRESET=tpu_large_chunks` to select the experimentally validated
+`512/65536` preset. Explicit `TUNIX_ACCEL_CE_TOKEN_CHUNK` and
+`TUNIX_ACCEL_CE_VOCAB_CHUNK` values override the preset.
 
 ## Tiled MLP Controls
 

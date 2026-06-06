@@ -13,7 +13,12 @@ Main report and figures:
 - `01-CCE/assets/gemma3_270m_cce_status_heatmap.png`
 - `01-CCE/assets/gemma3_270m_cce_tuning.png`
 - `01-CCE/assets/gemma3_270m_cce_quality.png`
-- `01-CCE/assets/gemma3_270m_cce_mesh_generalization.png`
+- `01-CCE/assets/gemma3_270m_cce_mesh_2x2_repeat.png`
+- `01-CCE/assets/gemma3_270m_cce_4chip_frontier.png`
+- `01-CCE/assets/gemma3_270m_cce_outlier_hlo.png`
+- `01-CCE/assets/gemma3_270m_cce_4chip_chunk_tuning.png`
+- `01-CCE/assets/gemma3_270m_cce_4chip_chunk_axis_ablation.png`
+- `01-CCE/assets/gemma3_270m_cce_4chip_quality.png`
 
 Compact rerun data:
 
@@ -35,15 +40,24 @@ Compact rerun data:
 - `01-CCE/data/gemma3_270m_mesh_cce/mesh_runs.csv`
 - `01-CCE/data/gemma3_270m_mesh_cce/mesh_summary.csv`
 - `01-CCE/data/gemma3_270m_mesh_cce/matched_memory.csv`
+- `01-CCE/data/gemma3_270m_mesh_cce_repeat/repeat_summary.csv`
+- `01-CCE/data/gemma3_270m_4chip_frontier/frontier_summary.csv`
+- `01-CCE/data/gemma3_270m_outlier_hlo/hlo_op_counts.csv`
+- `01-CCE/data/gemma3_270m_4chip_chunk/chunk_summary.csv`
+- `01-CCE/data/gemma3_270m_4chip_chunk/chunk_axis_ablation.csv`
+- `01-CCE/data/gemma3_270m_4chip_quality/training_summary.csv`
 
 Compressed raw worker outputs:
 
 - `01-CCE/data/gemma3_270m_full_cce/raw_artifacts/*.tar.gz`
 - `01-CCE/data/gemma3_270m_mesh_cce/raw_artifacts/*.tar.gz`
+- `01-CCE/data/gemma3_270m_mesh_cce_repeat/raw_artifacts/*.tar.gz`
+- `01-CCE/data/gemma3_270m_4chip_frontier/raw_artifacts/*.tar.gz`
+- `01-CCE/data/gemma3_270m_4chip_chunk/raw_artifacts/*.tar.gz`
+- `01-CCE/data/gemma3_270m_4chip_quality/raw_artifacts/*.tar.gz`
 
-Do not commit the extracted `01-CCE/data/gemma3_270m_full_cce/raw/` directory.
-Do not commit the extracted `01-CCE/data/gemma3_270m_mesh_cce/raw/` directory
-either. They are recreated by the collector scripts from the tarballs.
+Do not commit extracted `raw/` directories. They are recreated by the collector
+scripts from the tarballs.
 
 ## Local Patch Install
 
@@ -67,6 +81,14 @@ unset TUNIX_ACCEL_DISABLE_AUTOPATCH
 export TUNIX_ACCEL_DISABLE_CE=0
 export TUNIX_ACCEL_CE_TOKEN_CHUNK=128
 export TUNIX_ACCEL_CE_VOCAB_CHUNK=8192
+```
+
+The conservative rerun default is `128/8192`. The four-chip mixed-mesh follow-up
+also validated the convenience preset below, which maps to `512/65536` unless
+explicit chunk variables override it:
+
+```bash
+export TUNIX_ACCEL_CE_PRESET=tpu_large_chunks
 ```
 
 The rerun worker always disables the unrelated patches:
@@ -151,6 +173,15 @@ The final rerun used these worker profiles:
 | `mesh-fsdp4` | v5litepod-4 synthetic mesh check with `fsdp=4,tp=1` |
 | `mesh-2x2` | v5litepod-4 synthetic mesh check with `fsdp=2,tp=2` |
 | `mesh-tp4` | v5litepod-4 synthetic mesh check with `fsdp=1,tp=4` |
+| `mesh-2x2-repeat` | repeated b16/b32 timing check for the mixed mesh |
+| `mesh-repeat-rest` | repeated timing checks for `fsdp=4,tp=1` and `fsdp=1,tp=4` |
+| `fourchip-frontier-fsdp4` | extended four-chip frontier for `fsdp=4,tp=1` |
+| `fourchip-frontier-2x2` | extended four-chip frontier for `fsdp=2,tp=2` |
+| `fourchip-frontier-tp4` | extended four-chip frontier for `fsdp=1,tp=4` |
+| `outlier-hlo` | full XLA dump for the mixed-mesh outlier scan |
+| `fourchip-chunk-2x2` | CCE chunk tuning for `fsdp=2,tp=2`, b16/L512 |
+| `fourchip-quality-fsdp4-default` | OPUS100 1,000-step four-chip Default CE parity row |
+| `fourchip-quality-fsdp4-cce` | OPUS100 1,000-step four-chip CCE parity row |
 
 Example parallel schedule:
 
@@ -171,6 +202,15 @@ Run the mesh profiles on `v5litepod-4` workers:
 bash 01-CCE/remote_gemma3_270m_cce_worker.sh mesh-fsdp4
 bash 01-CCE/remote_gemma3_270m_cce_worker.sh mesh-2x2
 bash 01-CCE/remote_gemma3_270m_cce_worker.sh mesh-tp4
+bash 01-CCE/remote_gemma3_270m_cce_worker.sh mesh-2x2-repeat
+bash 01-CCE/remote_gemma3_270m_cce_worker.sh mesh-repeat-rest
+bash 01-CCE/remote_gemma3_270m_cce_worker.sh fourchip-frontier-fsdp4
+bash 01-CCE/remote_gemma3_270m_cce_worker.sh fourchip-frontier-2x2
+bash 01-CCE/remote_gemma3_270m_cce_worker.sh fourchip-frontier-tp4
+bash 01-CCE/remote_gemma3_270m_cce_worker.sh outlier-hlo
+bash 01-CCE/remote_gemma3_270m_cce_worker.sh fourchip-chunk-2x2
+bash 01-CCE/remote_gemma3_270m_cce_worker.sh fourchip-quality-fsdp4-default
+bash 01-CCE/remote_gemma3_270m_cce_worker.sh fourchip-quality-fsdp4-cce
 ```
 
 ## Local Aggregation
@@ -180,13 +220,18 @@ After all tarballs are copied into `raw_artifacts/`, run:
 ```bash
 python3 01-CCE/collect_gemma3_270m_cce_results.py
 python3 01-CCE/collect_gemma3_270m_mesh_results.py
+python3 01-CCE/collect_gemma3_270m_mesh_repeat_results.py
+python3 01-CCE/collect_gemma3_270m_4chip_frontier_results.py
+python3 01-CCE/collect_gemma3_270m_outlier_hlo_results.py
+python3 01-CCE/collect_gemma3_270m_4chip_chunk_results.py
+python3 01-CCE/collect_gemma3_270m_4chip_quality_results.py
 ```
 
-The collector:
+The collectors:
 
-1. extracts the tarballs into `data/gemma3_270m_full_cce/raw/`,
-2. rebuilds compact CSV/JSONL summaries,
-3. redraws the four report figures.
+1. extract the tarballs into the relevant disposable `raw/` directories,
+2. rebuild compact CSV/JSONL summaries,
+3. redraw the report figures.
 
 The extracted `raw/` tree is intentionally disposable. Remove it before
 committing:
@@ -194,6 +239,10 @@ committing:
 ```bash
 rm -rf 01-CCE/data/gemma3_270m_full_cce/raw
 rm -rf 01-CCE/data/gemma3_270m_mesh_cce/raw
+rm -rf 01-CCE/data/gemma3_270m_mesh_cce_repeat/raw
+rm -rf 01-CCE/data/gemma3_270m_4chip_frontier/raw
+rm -rf 01-CCE/data/gemma3_270m_4chip_chunk/raw
+rm -rf 01-CCE/data/gemma3_270m_4chip_quality/raw
 ```
 
 ## Expected Checks
@@ -210,6 +259,9 @@ The rerun should reproduce the following qualitative findings:
 - On `v5litepod-4`, CCE works across `fsdp=4,tp=1`, `fsdp=2,tp=2`, and
   `fsdp=1,tp=4`; matched passing rows show about 53-66% per-chip XLA planned
   HBM reduction.
+- The repeated `fsdp=2,tp=2` default chunk row is a throughput outlier, but
+  larger TPU chunk settings reduce b16/L512 from about 15.4s/step to about
+  0.83s/step at the same 2.65 GiB/chip XLA HBM.
 
 Generation note: the CCE LoRA training hook intercepts hidden states in the
 loss path. Before sampling, call the restore path so Tunix generation sees the

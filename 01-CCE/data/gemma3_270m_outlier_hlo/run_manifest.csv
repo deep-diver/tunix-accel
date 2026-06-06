@@ -1,0 +1,2 @@
+artifact,bytes,profile,tpu,chips,project,zone,model
+data/gemma3_270m_outlier_hlo/raw_artifacts/gemma3-270m-cce-outlier-hlo-outlier-hlo.tar.gz,193809132,gemma3-270m-cce-outlier-hlo-outlier-hlo,v5litepod-4,4,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it

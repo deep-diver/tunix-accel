@@ -85,85 +85,6 @@ def save(fig, path: Path) -> None:
     print(path.relative_to(ROOT))
 
 
-def cce_context_memory_plot() -> None:
-    rows = read_csv(ROOT / "01-CCE/data/gemma3_270m_1b_context_summary.csv")
-
-    batch_colors = {
-        8: "#4e7fb2",
-        16: "#2ca24f",
-        32: "#ff7f0e",
-        64: "#7c3aed",
-    }
-    variant_style = {
-        "default-lora": ("Default CE", "--"),
-        "cce-lora": ("CCE", "-"),
-    }
-
-    fig, axes = plt.subplots(1, 2, figsize=(17, 7.8), sharey=True)
-    fig.suptitle("Context Sweep Memory: Compare the Chip That Actually OOMs", fontsize=23, fontweight="bold", y=0.99)
-    fig.text(
-        0.5,
-        0.94,
-        "Same Gemma3 sweep data as before, redrawn as max per-chip XLA planned HBM; red-outlined markers are compile-OOM points.",
-        ha="center",
-        color=MUTED,
-        fontsize=13,
-    )
-
-    for ax, size, title in zip(axes, ["270m", "1b"], ["Gemma3 270M on v5litepod-1", "Gemma3 1B on v5litepod-4"]):
-        subset = [r for r in rows if r["size"] == size and r["xla_peak_gib_per_chip"] != ""]
-        for batch in [8, 16, 32, 64]:
-            for variant, (variant_label, linestyle) in variant_style.items():
-                points = [
-                    r
-                    for r in subset
-                    if int(r["batch_size"]) == batch and r["variant"] == variant
-                ]
-                if not points:
-                    continue
-                points.sort(key=lambda r: int(r["max_length"]))
-                xs = [int(r["max_length"]) for r in points]
-                ys = [fnum(r["xla_peak_gib_per_chip"]) for r in points]
-                color = batch_colors[batch]
-                label = f"b{batch} {variant_label}" if ax is axes[0] else None
-                ax.plot(xs, ys, linestyle=linestyle, color=color, linewidth=2.2, alpha=0.92, label=label)
-                for r, xval, yval in zip(points, xs, ys):
-                    oom = r["status"] == "oom"
-                    ax.scatter(
-                        [xval],
-                        [yval],
-                        s=58,
-                        color=color,
-                        edgecolors=RED if oom else "white",
-                        linewidths=2.0 if oom else 0.8,
-                        zorder=3,
-                    )
-
-        ax.axhline(15.75, color=INK, linewidth=1.1, linestyle="--", alpha=0.65)
-        ax.text(530, 15.75 + 0.45, "~15.75 GiB/chip v5e HBM", ha="left", va="bottom", fontsize=10, color=MUTED)
-        ax.set_xscale("log", base=2)
-        ax.set_xticks([512, 1024, 2048, 4096, 8192, 16384])
-        ax.set_xticklabels(["512", "1K", "2K", "4K", "8K", "16K"])
-        ax.set_title(title)
-        ax.set_xlabel("Context length")
-        ax.set_ylim(0, 32)
-        style_axes(ax)
-
-    axes[0].set_ylabel("Max per-chip XLA planned HBM (GiB)")
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.02), ncol=4, frameon=False, fontsize=10)
-    fig.text(
-        0.5,
-        0.115,
-        "Per-chip memory is the fit criterion. Aggregate accounting remains in the CSV for resource accounting, but it is not the visual axis.",
-        ha="center",
-        color=MUTED,
-        fontsize=11,
-    )
-    fig.tight_layout(rect=(0.03, 0.18, 0.99, 0.88), w_pad=2.4)
-    save(fig, ROOT / "01-CCE/assets/gemma3_270m_1b_context_memory.png")
-
-
 def cce_memory_plot() -> None:
     g3 = read_csv(ROOT / "01-CCE/data/gemma3_b16_aggregate_hbm.csv")
     g4 = read_csv(ROOT / "01-CCE/data/gemma4_base_cce_tpu_l2048_b1.csv")
@@ -504,7 +425,6 @@ def activation_plot() -> None:
 
 def main() -> None:
     configure()
-    cce_context_memory_plot()
     cce_memory_plot()
     packing_plot()
     tiled_mlp_plot()

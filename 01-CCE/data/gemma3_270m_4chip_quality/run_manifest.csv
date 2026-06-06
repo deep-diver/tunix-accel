@@ -1,0 +1,3 @@
+artifact,bytes,profile,tpu,chips,project,zone,model
+data/gemma3_270m_4chip_quality/raw_artifacts/gemma3-270m-cce-4chip-quality-cce-fourchip-quality-fsdp4-cce.tar.gz,303624,gemma3-270m-cce-4chip-quality-cce-fourchip-quality-fsdp4-cce,v5litepod-4,4,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
+data/gemma3_270m_4chip_quality/raw_artifacts/gemma3-270m-cce-4chip-quality-default-fourchip-quality-fsdp4-default.tar.gz,306769,gemma3-270m-cce-4chip-quality-default-fourchip-quality-fsdp4-default,v5litepod-4,4,gcp-ml-172005,us-west4-a,google/gemma-3-270m-it
