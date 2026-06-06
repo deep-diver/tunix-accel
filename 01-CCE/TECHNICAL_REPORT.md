@@ -1,4 +1,4 @@
-# Cut Cross Entropy on JAX/Tunix TPU: Gemma 270M Base and Transfer Evidence
+# Cut Cross Entropy on JAX/Tunix TPU: Loss-Logits Memory Wall and Transfer Evidence
 
 This report makes one narrow, reproducible claim: on Gemma LoRA SFT with
 JAX/Tunix on Cloud TPU v5e, Cut Cross Entropy removes a real loss-logits memory
@@ -9,6 +9,12 @@ checks under an eight-chip FSDP setup, not a replacement for the deeper 270M
 sweep.
 
 ## Executive Summary
+
+The short version is: CCE is not a universal memory optimizer and it is not
+mainly a speed optimization. It is a targeted replacement for the dense
+loss-logits path. When that path is the memory wall, CCE opens batch/context
+shapes that Default CE cannot compile. When another buffer becomes the wall,
+the visible gain is smaller.
 
 | Question | Result |
 | --- | --- |
@@ -85,7 +91,9 @@ rank sensitivity, chunk tuning, one-step parity, and OPUS100 training runs.
 The four-chip follow-up added repeated mesh timings, frontier sweeps, HLO text
 scans, mixed-mesh chunk tuning, and a 1,000-step OPUS100 parity run.
 
-The transfer checks reused the four-chip setup:
+The transfer checks were split into two tiers. The 1B/E2B tier reused the
+four-chip FSDP setup and retained short OPUS100 sanity rows. The 4B/E4B tier
+used an eight-chip FSDP setup and focused on frontier and chunk behavior only.
 
 | Model | TPU / mesh | Synthetic coverage | OPUS100 sanity row |
 | --- | --- | --- | --- |
@@ -277,10 +285,17 @@ correctness or memory failure. The package keeps the conservative `128/8192`
 default, but adds an opt-in `TUNIX_ACCEL_CE_PRESET=tpu_large_chunks` shortcut
 for the validated `512/65536` TPU setting.
 
-## 5. Transfer Checks: Gemma3 1B and Gemma4 E2B
+## 5. Transfer Checks: Scaling the Claim
 
-After the 270M base case was complete, we repeated the most important checks on
-larger Gemma models using the same four-chip FSDP-only mesh.
+After the 270M base case was complete, we asked whether the same systems claim
+survives larger Gemma models. The transfer checks are intentionally narrower
+than the 270M package: they test whether CCE still moves the fit frontier under
+the chosen mesh, not whether every 270M ablation repeats at every model size.
+
+### Four-Chip 1B/E2B Checks
+
+Gemma3 1B and Gemma4 E2B used `v5litepod-4`, four chips, with `fsdp=4,tp=1` as
+the primary mesh.
 
 ![Gemma CCE transfer frontier](./assets/gemma_cce_transfer_frontier.png)
 
@@ -319,10 +334,12 @@ models should prefer FSDP-only unless there is a separate reason to pay for TP.
 
 ![Gemma CCE transfer chunk and mesh](./assets/gemma_cce_transfer_chunk_mesh.png)
 
+### Eight-Chip 4B/E4B Checks
+
 We then ran a focused larger-model transfer check on `v5litepod-8`,
-`fsdp=8,tp=1`. This was not another exhaustive sweep. It kept the same question
-as the transfer section: when the model is larger and the TPU has more chips, do
-we still see CCE opening shapes that Default CE cannot compile?
+`fsdp=8,tp=1`. This was not another exhaustive sweep. It kept the same question:
+when the model is larger and the TPU has more chips, do we still see CCE opening
+shapes that Default CE cannot compile?
 
 ![Gemma CCE larger transfer frontier](./assets/gemma_cce_large_transfer_frontier.png)
 
@@ -346,6 +363,16 @@ the report: max per-chip XLA buffer-assignment planned HBM.
 | Gemma3 4B b4/L1024 | compile failed | 16.54 GiB/chip | OK | 15.04 GiB/chip |
 | Gemma4 E4B b4/L512 | compile failed | 20.30 GiB/chip | OK | 14.53 GiB/chip |
 | Gemma4 E4B b8/L256 | compile failed | 18.66 GiB/chip | OK | 13.60 GiB/chip |
+
+The Gemma3 4B and Gemma4 E4B rows also show why CCE savings should not be
+predicted from parameter count alone. At the same `b4/L512` shape, Gemma3 4B
+completed under both variants and went from 9.58 to 8.58 GiB/chip. Gemma4 E4B
+failed under Default CE with a 20.30 GiB/chip compile plan, then completed under
+CCE at 14.53 GiB/chip. Both are "4B-class" models, but their XLA graphs do not
+put the same fraction of peak memory in the Default CE loss path. The larger E4B
+gain is therefore not a generic "4B model" rule; it is a graph-specific result
+where the failed Default CE compile plan was dominated more heavily by
+loss-logits buffers.
 
 The larger-model chunk tuning result is also useful, but more modest than the
 270M mixed-mesh outlier. At these FSDP-only pressure points, chunk choice mostly
