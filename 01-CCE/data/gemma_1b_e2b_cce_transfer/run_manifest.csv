@@ -1,0 +1,9 @@
+artifact,bytes,profile,tpu,chips,project,zone
+data/gemma_1b_e2b_cce_transfer/raw_artifacts/gemma-cce-1b-exhaustive-fourchip-frontier-2x2.tar.gz,9330883,gemma-cce-1b-exhaustive-fourchip-frontier-2x2,v5litepod-4,4,gcp-ml-172005,us-west4-a
+data/gemma_1b_e2b_cce_transfer/raw_artifacts/gemma-cce-1b-exhaustive-fourchip-frontier-fsdp4.tar.gz,4178203,gemma-cce-1b-exhaustive-fourchip-frontier-fsdp4,v5litepod-4,4,gcp-ml-172005,us-west4-a
+data/gemma_1b_e2b_cce_transfer/raw_artifacts/gemma-cce-1b-followup2-fourchip-chunk-fsdp4.tar.gz,1836981,gemma-cce-1b-followup2-fourchip-chunk-fsdp4,v5litepod-4,4,gcp-ml-172005,us-west4-a
+data/gemma_1b_e2b_cce_transfer/raw_artifacts/gemma-cce-1b-quality-matched.tar.gz,625505,gemma-cce-1b-quality-matched,v5litepod-4,4,gcp-ml-172005,us-west4-a
+data/gemma_1b_e2b_cce_transfer/raw_artifacts/gemma-cce-e2b-chunk.slim.tar.gz,4301865,gemma-cce-e2b-chunk.slim,v5litepod-4,4,gcp-ml-172005,us-west4-a
+data/gemma_1b_e2b_cce_transfer/raw_artifacts/gemma-cce-e2b-exhaustive-fourchip-frontier-fsdp4.slim.tar.gz,3969793,gemma-cce-e2b-exhaustive-fourchip-frontier-fsdp4.slim,v5litepod-4,4,gcp-ml-172005,us-west4-a
+data/gemma_1b_e2b_cce_transfer/raw_artifacts/gemma-cce-e2b-mesh-probe.slim.tar.gz,465539,gemma-cce-e2b-mesh-probe.slim,v5litepod-4,4,gcp-ml-172005,us-west4-a
+data/gemma_1b_e2b_cce_transfer/raw_artifacts/gemma-cce-e2b-quality-matched.tar.gz,661146,gemma-cce-e2b-quality-matched,v5litepod-4,4,gcp-ml-172005,us-west4-a

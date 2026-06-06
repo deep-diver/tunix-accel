@@ -4,8 +4,9 @@ This repository contains drop-in acceleration and memory-efficiency experiments
 for JAX/Tunix training.
 
 - `tunix_accel/`: reusable patch code for Tunix decoder-LM training.
-- `01-CCE/`: the final experiment report, retained summary data, figures, and
-  reproduction guide.
+- `01-CCE/`: the final Cut Cross Entropy report, retained summary data,
+  figures, and reproduction guide, centered on Gemma3 270M with Gemma3 1B /
+  Gemma4 E2B transfer checks.
 - `02-PACKING/`: the final sequence-packing experiment report, retained summary
   data, figures, and reproduction guide.
 - `03-TILED-MLP/`: the final Gemma3 tiled gated-MLP experiment report plus

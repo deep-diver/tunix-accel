@@ -31,9 +31,38 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 TRAINING_RUNNER = REPO_ROOT / "02-PACKING" / "run_gemma_training_benchmark.py"
 
-MODEL_ID = "google/gemma-3-270m-it"
-MODEL_PATH = "gs://gemma-data/checkpoints/gemma3-270m-it"
-TOKENIZER_GCS = "gs://gemma-data/tokenizers/tokenizer_gemma3.model"
+MODEL_PRESETS = {
+    "270m": {
+        "label": "Gemma3 270M",
+        "model_id": "google/gemma-3-270m-it",
+        "model_source": "gcs",
+        "model_path": "gs://gemma-data/checkpoints/gemma3-270m-it",
+        "tokenizer_source": "sentencepiece",
+        "tokenizer_path": "gs://gemma-data/tokenizers/tokenizer_gemma3.model",
+        "allow_download": False,
+        "enable_gemma4_hf_loader": False,
+    },
+    "1b": {
+        "label": "Gemma3 1B",
+        "model_id": "google/gemma-3-1b-it",
+        "model_source": "gcs",
+        "model_path": "gs://gemma-data/checkpoints/gemma3-1b-it",
+        "tokenizer_source": "sentencepiece",
+        "tokenizer_path": "gs://gemma-data/tokenizers/tokenizer_gemma3.model",
+        "allow_download": False,
+        "enable_gemma4_hf_loader": False,
+    },
+    "e2b": {
+        "label": "Gemma4 E2B",
+        "model_id": "google/gemma-4-E2B",
+        "model_source": "huggingface",
+        "model_path": "",
+        "tokenizer_source": "huggingface",
+        "tokenizer_path": "",
+        "allow_download": True,
+        "enable_gemma4_hf_loader": True,
+    },
+}
 
 ENV_KEYS = {
     "TUNIX_ACCEL_DISABLE_AUTOPATCH",
@@ -146,6 +175,7 @@ def cleanup_xla_dir(xla_dir: Path, *, keep_all_xla: bool) -> None:
 
 def configure_env(
     *,
+    args: argparse.Namespace,
     variant: str,
     token_chunk: int,
     vocab_chunk: int,
@@ -165,6 +195,8 @@ def configure_env(
       "TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION": "0",
       "XLA_FLAGS": f"--xla_dump_to={xla_dir} --xla_dump_hlo_as_text",
   })
+  if args.enable_gemma4_hf_loader:
+    env["TUNIX_ACCEL_ENABLE_GEMMA4_HF_LOADER"] = "1"
   if variant == "default":
     env["TUNIX_ACCEL_DISABLE_AUTOPATCH"] = "1"
   elif variant == "cce":
@@ -191,15 +223,15 @@ def command_for_case(
       sys.executable,
       str(TRAINING_RUNNER),
       "--model-id",
-      MODEL_ID,
+      args.model_id,
       "--model-source",
-      "gcs",
+      args.model_source,
       "--model-path",
-      MODEL_PATH,
+      args.model_path,
       "--tokenizer-source",
-      "sentencepiece",
+      args.tokenizer_source,
       "--tokenizer-path",
-      TOKENIZER_GCS,
+      args.tokenizer_path,
       "--dataset-mode",
       dataset_mode,
       "--num-examples",
@@ -248,6 +280,10 @@ def command_for_case(
     ])
   if variant == "cce":
     command.append("--allow-autopatch")
+  if args.model_download_path:
+    command.extend(["--model-download-path", args.model_download_path])
+  if args.allow_download:
+    command.append("--allow-download")
   return command
 
 
@@ -277,6 +313,7 @@ def run_case(
     shutil.rmtree(run_dir, ignore_errors=True)
     xla_dir.mkdir(parents=True, exist_ok=True)
     env = configure_env(
+        args=args,
         variant=variant,
         token_chunk=token_chunk,
         vocab_chunk=vocab_chunk,
@@ -318,8 +355,8 @@ def run_case(
   row: dict[str, Any] = {
       "suite": suite,
       "case": case_name,
-      "model": "Gemma3 270M",
-      "model_id": MODEL_ID,
+      "model": args.model_label,
+      "model_id": args.model_id,
       "tpu": args.tpu,
       "chips": args.chips,
       "mesh_fsdp": args.mesh_fsdp,
@@ -460,6 +497,18 @@ def suite_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
 
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser()
+  parser.add_argument("--model-size", choices=sorted(MODEL_PRESETS), default="270m")
+  parser.add_argument("--model-id", default=None)
+  parser.add_argument("--model-source", choices=["gcs", "huggingface"], default=None)
+  parser.add_argument("--model-path", default=None)
+  parser.add_argument("--model-download-path", default="")
+  parser.add_argument(
+      "--tokenizer-source",
+      choices=["sentencepiece", "huggingface"],
+      default=None,
+  )
+  parser.add_argument("--tokenizer-path", default=None)
+  parser.add_argument("--allow-download", action="store_true")
   parser.add_argument("--suite", default="frontier")
   parser.add_argument("--variants", default="default,cce")
   parser.add_argument("--batch-sizes", default="1,2,4,8,16,32,64,128")
@@ -492,14 +541,35 @@ def parse_args() -> argparse.Namespace:
   return parser.parse_args()
 
 
+def resolve_model_args(args: argparse.Namespace) -> None:
+  preset = MODEL_PRESETS[args.model_size]
+  args.model_label = preset["label"]
+  args.model_id = args.model_id or preset["model_id"]
+  args.model_source = args.model_source or preset["model_source"]
+  args.model_path = args.model_path if args.model_path is not None else preset["model_path"]
+  args.tokenizer_source = args.tokenizer_source or preset["tokenizer_source"]
+  args.tokenizer_path = (
+      args.tokenizer_path if args.tokenizer_path is not None else preset["tokenizer_path"]
+  )
+  args.allow_download = bool(args.allow_download or preset["allow_download"])
+  args.enable_gemma4_hf_loader = bool(preset["enable_gemma4_hf_loader"])
+  if args.model_size == "e2b" and not args.model_download_path:
+    shared_cache = os.environ.get("TUNIX_ACCEL_MODEL_DOWNLOAD_PATH")
+    if shared_cache:
+      args.model_download_path = shared_cache
+    else:
+      args.model_download_path = str(args.outdir / "hf-cache" / args.model_size)
+
+
 def main() -> None:
   args = parse_args()
+  args.outdir = args.outdir.expanduser().resolve()
+  resolve_model_args(args)
   if args.mesh_fsdp * args.mesh_tp != args.chips:
     raise ValueError(
         "mesh_fsdp * mesh_tp must equal chips for metadata and runner "
         f"consistency. Got {args.mesh_fsdp} * {args.mesh_tp} != {args.chips}."
     )
-  args.outdir = args.outdir.expanduser().resolve()
   args.outdir.mkdir(parents=True, exist_ok=True)
   rows: list[dict[str, Any]] = []
   results_path = args.outdir / f"{args.suite}_results.csv"
@@ -507,8 +577,8 @@ def main() -> None:
     if case.get("skipped"):
       row = {
           "suite": case["suite"],
-          "model": "Gemma3 270M",
-          "model_id": MODEL_ID,
+          "model": args.model_label,
+          "model_id": args.model_id,
           "tpu": args.tpu,
           "chips": args.chips,
           "mesh_fsdp": args.mesh_fsdp,

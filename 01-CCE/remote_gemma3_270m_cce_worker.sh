@@ -2,10 +2,11 @@
 set -euo pipefail
 
 PROFILE="${1:-frontier-low}"
+MODEL_SIZE="${MODEL_SIZE:-270m}"
 ROOT="${ROOT:-$HOME/TUNIX-TRY}"
-OUT_BASE="${OUT_BASE:-/tmp/gemma3-270m-cce-rerun}"
+OUT_BASE="${OUT_BASE:-/tmp/gemma-cce-${MODEL_SIZE}}"
 PYTHON_BIN="${PYTHON_BIN:-python3.11}"
-VENV_DIR="${VENV_DIR:-$HOME/.venvs/tunix-cce270m-py311}"
+VENV_DIR="${VENV_DIR:-$HOME/.venvs/tunix-cce-${MODEL_SIZE}-py311}"
 
 cd "${ROOT}"
 mkdir -p "${OUT_BASE}"
@@ -38,10 +39,14 @@ fi
 
 export PYTHONUNBUFFERED=1
 export HF_HUB_ENABLE_HF_TRANSFER=0
+export HF_HUB_DISABLE_PROGRESS_BARS=1
 export PYTHONPATH="${ROOT}:${PYTHONPATH:-}"
+if [[ "${MODEL_SIZE}" == "e2b" && -z "${TUNIX_ACCEL_MODEL_DOWNLOAD_PATH:-}" ]]; then
+  export TUNIX_ACCEL_MODEL_DOWNLOAD_PATH="${OUT_BASE}/hf-cache/e2b"
+fi
 
 run_sweep() {
-  python 01-CCE/run_gemma3_270m_cce_sweep.py "$@"
+  python 01-CCE/run_gemma3_270m_cce_sweep.py --model-size "${MODEL_SIZE}" "$@"
 }
 
 run_mesh_sweep() {
@@ -170,6 +175,25 @@ run_fourchip_quality() {
 }
 
 case "${PROFILE}" in
+  pilot-fsdp4)
+    run_sweep \
+      --suite pilot_fsdp4_tp1 \
+      --variants default,cce \
+      --batch-sizes 1,16 \
+      --contexts 256,512 \
+      --lora-ranks 16 \
+      --dataset-mode synthetic \
+      --num-examples 512 \
+      --max-steps 2 \
+      --skip-quality-eval \
+      --mesh-fsdp 4 \
+      --mesh-tp 1 \
+      --tpu v5litepod-4 \
+      --chips 4 \
+      --force \
+      --outdir "${OUT_BASE}/pilot_fsdp4_tp1"
+    ;;
+
   parity)
     python -m pytest -q \
       tests/test_chunked_linear_ce.py \
@@ -387,6 +411,27 @@ case "${PROFILE}" in
       --outdir "${OUT_BASE}/fourchip_chunk_fsdp2_tp2_b16_l512"
     ;;
 
+  fourchip-chunk-fsdp4)
+    run_sweep \
+      --suite fourchip_chunk_fsdp4_tp1_b16_l512 \
+      --variants cce \
+      --batch-sizes 16 \
+      --contexts 512 \
+      --lora-ranks 16 \
+      --token-chunks 64,128,256,512 \
+      --vocab-chunks 4096,8192,16384,32768 \
+      --dataset-mode synthetic \
+      --num-examples 1024 \
+      --max-steps 4 \
+      --skip-quality-eval \
+      --mesh-fsdp 4 \
+      --mesh-tp 1 \
+      --tpu v5litepod-4 \
+      --chips 4 \
+      --force \
+      --outdir "${OUT_BASE}/fourchip_chunk_fsdp4_tp1_b16_l512"
+    ;;
+
   fourchip-quality-fsdp4-default)
     run_fourchip_quality quality_4chip_fsdp4_default_b16_l512 default 4 1
     ;;
@@ -401,5 +446,9 @@ case "${PROFILE}" in
     ;;
 esac
 
-tar -C "$(dirname "${OUT_BASE}")" -czf "${OUT_BASE}-${PROFILE}.tar.gz" "$(basename "${OUT_BASE}")"
+tar \
+  --exclude="$(basename "${OUT_BASE}")/hf-cache" \
+  -C "$(dirname "${OUT_BASE}")" \
+  -czf "${OUT_BASE}-${PROFILE}.tar.gz" \
+  "$(basename "${OUT_BASE}")"
 echo "artifact=${OUT_BASE}-${PROFILE}.tar.gz"

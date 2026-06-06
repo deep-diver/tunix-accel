@@ -24,6 +24,8 @@ larger-model transfer checks are considered.
   collector.
 - `collect_gemma3_270m_4chip_quality_results.py`: four-chip OPUS100 parity
   collector.
+- `collect_gemma_1b_e2b_cce_transfer_results.py`: Gemma3 1B and Gemma4 E2B
+  transfer-check collector.
 - `assets/`: final plots used by the report.
 - `data/`: compact CSV/JSONL summaries retained from the experiments,
   including the Gemma4 base boundary rows.
@@ -51,6 +53,9 @@ The current primary evidence package is:
   - `assets/gemma3_270m_cce_4chip_chunk_tuning.png`
   - `assets/gemma3_270m_cce_4chip_chunk_axis_ablation.png`
   - `assets/gemma3_270m_cce_4chip_quality.png`
+  - `assets/gemma_cce_transfer_frontier.png`
+  - `assets/gemma_cce_transfer_quality.png`
+  - `assets/gemma_cce_transfer_chunk_mesh.png`
 
 The primary rerun rows used Cloud TPU `v5litepod-1`, one chip, in
 `us-west4-a`. The mesh generalization check used `v5litepod-4`, four chips, in
@@ -68,6 +73,9 @@ Mesh check data:
 - `data/gemma3_270m_4chip_chunk/chunk_summary.csv`
 - `data/gemma3_270m_4chip_chunk/chunk_axis_ablation.csv`
 - `data/gemma3_270m_4chip_quality/training_summary.csv`
+- `data/gemma_1b_e2b_cce_transfer/frontier_summary.csv`
+- `data/gemma_1b_e2b_cce_transfer/training_summary.csv`
+- `data/gemma_1b_e2b_cce_transfer/chunk_summary.csv`
 
 The extracted `data/gemma3_270m_full_cce/raw/` directory is disposable and
 should not be committed. Recreate it from `raw_artifacts/*.tar.gz` with:
@@ -80,7 +88,22 @@ python3 01-CCE/collect_gemma3_270m_4chip_frontier_results.py
 python3 01-CCE/collect_gemma3_270m_outlier_hlo_results.py
 python3 01-CCE/collect_gemma3_270m_4chip_chunk_results.py
 python3 01-CCE/collect_gemma3_270m_4chip_quality_results.py
+python3 01-CCE/collect_gemma_1b_e2b_cce_transfer_results.py
 ```
+
+## Gemma3 1B / Gemma4 E2B Transfer Package
+
+The transfer package asks whether the 270M CCE findings survive a larger
+four-chip FSDP setup. It used Cloud TPU `v5litepod-4`, four chips, in
+`us-west4-a`, with `fsdp=4,tp=1` as the primary mesh.
+
+- Data: `data/gemma_1b_e2b_cce_transfer/`
+- Raw artifacts:
+  `data/gemma_1b_e2b_cce_transfer/raw_artifacts/*.tar.gz`
+- Figures:
+  - `assets/gemma_cce_transfer_frontier.png`
+  - `assets/gemma_cce_transfer_quality.png`
+  - `assets/gemma_cce_transfer_chunk_mesh.png`
 
 ## Gemma4 Rows
 

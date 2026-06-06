@@ -1,8 +1,9 @@
-# Reproducing the Gemma3 270M CCE Rerun
+# Reproducing the Gemma CCE Rerun and Transfer Checks
 
-This guide reproduces the final 01-CCE rerun: Gemma3 270M LoRA SFT on TPU,
-Default CE versus Cut Cross Entropy only. It intentionally keeps Packing, Tiled
-MLP, Activation Policy, and Splash Attention disabled.
+This guide reproduces the final 01-CCE package: the exhaustive Gemma3 270M CCE
+rerun plus the four-chip Gemma3 1B / Gemma4 E2B transfer checks. It
+intentionally keeps Packing, Tiled MLP, Activation Policy, and Splash Attention
+disabled.
 
 ## Retained Artifacts
 
@@ -19,6 +20,9 @@ Main report and figures:
 - `01-CCE/assets/gemma3_270m_cce_4chip_chunk_tuning.png`
 - `01-CCE/assets/gemma3_270m_cce_4chip_chunk_axis_ablation.png`
 - `01-CCE/assets/gemma3_270m_cce_4chip_quality.png`
+- `01-CCE/assets/gemma_cce_transfer_frontier.png`
+- `01-CCE/assets/gemma_cce_transfer_quality.png`
+- `01-CCE/assets/gemma_cce_transfer_chunk_mesh.png`
 
 Compact rerun data:
 
@@ -46,6 +50,11 @@ Compact rerun data:
 - `01-CCE/data/gemma3_270m_4chip_chunk/chunk_summary.csv`
 - `01-CCE/data/gemma3_270m_4chip_chunk/chunk_axis_ablation.csv`
 - `01-CCE/data/gemma3_270m_4chip_quality/training_summary.csv`
+- `01-CCE/data/gemma_1b_e2b_cce_transfer/frontier_summary.csv`
+- `01-CCE/data/gemma_1b_e2b_cce_transfer/matched_metrics.csv`
+- `01-CCE/data/gemma_1b_e2b_cce_transfer/chunk_summary.csv`
+- `01-CCE/data/gemma_1b_e2b_cce_transfer/training_summary.csv`
+- `01-CCE/data/gemma_1b_e2b_cce_transfer/training_history.csv`
 
 Compressed raw worker outputs:
 
@@ -55,6 +64,7 @@ Compressed raw worker outputs:
 - `01-CCE/data/gemma3_270m_4chip_frontier/raw_artifacts/*.tar.gz`
 - `01-CCE/data/gemma3_270m_4chip_chunk/raw_artifacts/*.tar.gz`
 - `01-CCE/data/gemma3_270m_4chip_quality/raw_artifacts/*.tar.gz`
+- `01-CCE/data/gemma_1b_e2b_cce_transfer/raw_artifacts/*.tar.gz`
 
 Do not commit extracted `raw/` directories. They are recreated by the collector
 scripts from the tarballs.
@@ -116,6 +126,8 @@ The primary rerun artifacts were produced on:
 
 The mesh generalization check used the same project, zone, model, checkpoint,
 tokenizer, and image, but ran on Cloud TPU `v5litepod-4` with four chips.
+Gemma3 1B and Gemma4 E2B transfer checks also used `v5litepod-4`, four chips,
+with `fsdp=4,tp=1` as the primary mesh.
 
 Create one TPU VM per independent profile when you want maximum parallelism:
 
@@ -180,6 +192,8 @@ The final rerun used these worker profiles:
 | `fourchip-frontier-tp4` | extended four-chip frontier for `fsdp=1,tp=4` |
 | `outlier-hlo` | full XLA dump for the mixed-mesh outlier scan |
 | `fourchip-chunk-2x2` | CCE chunk tuning for `fsdp=2,tp=2`, b16/L512 |
+| `pilot-fsdp4` | small four-chip model-size pilot used before larger transfer sweeps |
+| `fourchip-chunk-fsdp4` | CCE chunk tuning for `fsdp=4,tp=1`, b16/L512 |
 | `fourchip-quality-fsdp4-default` | OPUS100 1,000-step four-chip Default CE parity row |
 | `fourchip-quality-fsdp4-cce` | OPUS100 1,000-step four-chip CCE parity row |
 
@@ -213,6 +227,36 @@ bash 01-CCE/remote_gemma3_270m_cce_worker.sh fourchip-quality-fsdp4-default
 bash 01-CCE/remote_gemma3_270m_cce_worker.sh fourchip-quality-fsdp4-cce
 ```
 
+For the transfer checks, reuse the same worker and set `MODEL_SIZE`:
+
+```bash
+MODEL_SIZE=1b OUT_BASE=/tmp/gemma-cce-1b-exhaustive \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh fourchip-frontier-fsdp4
+
+MODEL_SIZE=1b OUT_BASE=/tmp/gemma-cce-1b-exhaustive \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh fourchip-frontier-2x2
+
+MODEL_SIZE=1b OUT_BASE=/tmp/gemma-cce-1b-followup2 \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh fourchip-chunk-fsdp4
+
+MODEL_SIZE=e2b OUT_BASE=/tmp/gemma-cce-e2b-exhaustive \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh fourchip-frontier-fsdp4
+
+MODEL_SIZE=e2b OUT_BASE=/tmp/gemma-cce-e2b-chunk \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh fourchip-chunk-fsdp4
+```
+
+Gemma4 E2B uses Hugging Face model loading. Keep a valid Hugging Face token in
+the TPU VM cache or environment and reuse a shared model cache, for example:
+
+```bash
+export TUNIX_ACCEL_MODEL_DOWNLOAD_PATH=/tmp/gemma-cce-e2b-exhaustive/hf-cache/e2b
+```
+
+The matched OPUS100 transfer rows used direct `run_gemma3_270m_cce_sweep.py`
+commands because the matched safe shapes differ by model: Gemma3 1B used
+b8/L512, and Gemma4 E2B used b4/L256.
+
 ## Local Aggregation
 
 After all tarballs are copied into `raw_artifacts/`, run:
@@ -225,6 +269,7 @@ python3 01-CCE/collect_gemma3_270m_4chip_frontier_results.py
 python3 01-CCE/collect_gemma3_270m_outlier_hlo_results.py
 python3 01-CCE/collect_gemma3_270m_4chip_chunk_results.py
 python3 01-CCE/collect_gemma3_270m_4chip_quality_results.py
+python3 01-CCE/collect_gemma_1b_e2b_cce_transfer_results.py
 ```
 
 The collectors:

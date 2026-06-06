@@ -1,0 +1,7 @@
+model,mesh,batch_size,max_length,selection,token_chunk,vocab_chunk,mean_step_time_sec_excl_first,xla_train_step_gib_per_chip
+Gemma3 1B,fsdp4/tp1,16,512,conservative,128,8192,0.669310024666629,9.4
+Gemma3 1B,fsdp4/tp1,16,512,best,512,32768,0.5947670199990777,9.4
+Gemma4 E2B,fsdp4/tp1,4,512,conservative,128,8192,0.526556332999462,12.3
+Gemma4 E2B,fsdp4/tp1,4,512,best,512,16384,0.5070481535003637,12.3
+Gemma4 E2B,fsdp4/tp1,8,256,conservative,128,8192,0.5196719530003975,11.74
+Gemma4 E2B,fsdp4/tp1,8,256,best,512,16384,0.5014510860000883,11.74
