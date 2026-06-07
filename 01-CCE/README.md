@@ -28,6 +28,8 @@ larger-model transfer checks are considered.
   transfer-check collector.
 - `collect_gemma_4b_e4b_cce_transfer_results.py`: focused Gemma3 4B and
   Gemma4 E4B eight-chip transfer-check collector.
+- `collect_gemma3_12b_27b_cce_focused_results.py`: focused Gemma3 12B and
+  27B eight-chip boundary-check collector.
 - `assets/`: final plots used by the report.
 - `data/`: compact CSV/JSONL summaries retained from the experiments,
   including the Gemma4 base boundary rows.
@@ -61,6 +63,8 @@ The current primary evidence package is:
   - `assets/gemma_cce_large_transfer_frontier.png`
   - `assets/gemma_cce_large_transfer_pressure.png`
   - `assets/gemma_cce_large_transfer_chunk_tuning.png`
+  - `assets/gemma3_12b_27b_cce_focused_frontier.png`
+  - `assets/gemma3_12b_27b_cce_focused_hbm.png`
 
 The primary rerun rows used Cloud TPU `v5litepod-1`, one chip, in
 `us-west4-a`. The mesh generalization check used `v5litepod-4`, four chips, in
@@ -84,6 +88,10 @@ Mesh check data:
 - `data/gemma_4b_e4b_cce_transfer/frontier_summary.csv`
 - `data/gemma_4b_e4b_cce_transfer/pressure_points.csv`
 - `data/gemma_4b_e4b_cce_transfer/chunk_summary.csv`
+- `data/gemma3_12b_27b_cce_focused/frontier_summary.csv`
+- `data/gemma3_12b_27b_cce_focused/boundary_hbm_points.csv`
+- `data/gemma3_12b_27b_cce_focused/matched_metrics.csv`
+- `data/gemma3_12b_27b_multihost_smoke/multihost_smoke_summary.csv`
 
 The extracted `data/gemma3_270m_full_cce/raw/` directory is disposable and
 should not be committed. Recreate it from `raw_artifacts/*.tar.gz` with:
@@ -98,6 +106,7 @@ python3 01-CCE/collect_gemma3_270m_4chip_chunk_results.py
 python3 01-CCE/collect_gemma3_270m_4chip_quality_results.py
 python3 01-CCE/collect_gemma_1b_e2b_cce_transfer_results.py
 python3 01-CCE/collect_gemma_4b_e4b_cce_transfer_results.py
+python3 01-CCE/collect_gemma3_12b_27b_cce_focused_results.py
 ```
 
 ## Gemma3 1B / Gemma4 E2B Transfer Package
@@ -127,6 +136,30 @@ pattern survives on an eight-chip FSDP-only setup. It used Cloud TPU
   - `assets/gemma_cce_large_transfer_frontier.png`
   - `assets/gemma_cce_large_transfer_pressure.png`
   - `assets/gemma_cce_large_transfer_chunk_tuning.png`
+
+## Gemma3 12B / 27B Focused Boundary Package
+
+The 12B/27B focused boundary package asks where CCE stops moving the fit
+frontier under the same single-host eight-chip setup. It used Cloud TPU
+`v5litepod-8`, eight chips, in `us-west4-a`, with `fsdp=8,tp=1`. In this rerun
+CCE reduced XLA planned HBM, but did not create a new passing batch/context
+shape.
+
+- Data: `data/gemma3_12b_27b_cce_focused/`
+- Raw artifacts:
+  `data/gemma3_12b_27b_cce_focused/raw_artifacts/*.tar.gz`
+- Figures:
+  - `assets/gemma3_12b_27b_cce_focused_frontier.png`
+  - `assets/gemma3_12b_27b_cce_focused_hbm.png`
+
+The separate multi-host smoke package confirms actual Tunix distributed launch
+for larger slices after enabling JAX distributed initialization:
+
+- Gemma3 12B: `v5litepod-16`, `fsdp=16,tp=1`, `process_count=4`,
+  `global_devices=16`
+- Gemma3 27B: `v5litepod-32`, `fsdp=32,tp=1`, `process_count=8`,
+  `global_devices=32`
+- Data: `data/gemma3_12b_27b_multihost_smoke/`
 
 ## Gemma4 Rows
 

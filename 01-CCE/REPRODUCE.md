@@ -292,6 +292,45 @@ Gemma4 E4B uses Hugging Face loading in this package. Keep the Hugging Face
 token in `~/.cache/huggingface/token` or `HF_TOKEN`, and do not include the HF
 model cache in copied artifacts.
 
+For the focused eight-chip Gemma3 12B/27B boundary checks, use the generic
+large-chip profile:
+
+```bash
+MODEL_SIZE=12b OUT_BASE=/tmp/gemma-cce-12b-focused \
+  LARGE_FSDP=8 LARGE_TP=1 LARGE_TPU=v5litepod-8 LARGE_CHIPS=8 \
+  FOCUSED_BATCHES=1,2,4 FOCUSED_CONTEXTS=512,1024,2048,4096 \
+  FOCUSED_MAX_STEPS=2 \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh large-frontier-fsdp
+
+MODEL_SIZE=27b OUT_BASE=/tmp/gemma-cce-27b-focused-x8 \
+  LARGE_FSDP=8 LARGE_TP=1 LARGE_TPU=v5litepod-8 LARGE_CHIPS=8 \
+  FOCUSED_BATCHES=1,2,4 FOCUSED_CONTEXTS=512,1024,2048 \
+  FOCUSED_MAX_STEPS=2 \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh large-frontier-fsdp
+```
+
+For actual multi-host Tunix smoke tests, launch the worker command on all TPU VM
+hosts and pass `INITIALIZE_DISTRIBUTED=1`. The smoke rows retained in this
+package used batch 1, context 512, rank 16, synthetic data, and two steps:
+
+```bash
+gcloud compute tpus tpu-vm ssh TPU_12B_X16 \
+  --project=gcp-ml-172005 \
+  --zone=us-west4-a \
+  --worker=all \
+  --command 'cd ~/TUNIX-TRY && MODEL_SIZE=12b OUT_BASE=/tmp/tunix-dist-12b-smoke LARGE_FSDP=16 LARGE_TP=1 LARGE_TPU=v5litepod-16 LARGE_CHIPS=16 INITIALIZE_DISTRIBUTED=1 FOCUSED_VARIANTS=default,cce FOCUSED_BATCHES=1 FOCUSED_CONTEXTS=512 FOCUSED_MAX_STEPS=2 FOCUSED_NUM_EXAMPLES=128 bash 01-CCE/remote_gemma3_270m_cce_worker.sh large-frontier-fsdp'
+
+gcloud compute tpus tpu-vm ssh TPU_27B_X32 \
+  --project=gcp-ml-172005 \
+  --zone=us-west4-a \
+  --worker=all \
+  --command 'cd ~/TUNIX-TRY && MODEL_SIZE=27b OUT_BASE=/tmp/tunix-dist-27b-smoke LARGE_FSDP=32 LARGE_TP=1 LARGE_TPU=v5litepod-32 LARGE_CHIPS=32 INITIALIZE_DISTRIBUTED=1 FOCUSED_VARIANTS=default,cce FOCUSED_BATCHES=1 FOCUSED_CONTEXTS=512 FOCUSED_MAX_STEPS=2 FOCUSED_NUM_EXAMPLES=128 bash 01-CCE/remote_gemma3_270m_cce_worker.sh large-frontier-fsdp'
+```
+
+The logs should include `jax_distributed_initialized=...`; the retained smoke
+rows confirmed `process_count=4`, `global_devices=16` for 12B and
+`process_count=8`, `global_devices=32` for 27B.
+
 ## Local Aggregation
 
 After all tarballs are copied into `raw_artifacts/`, run:
@@ -306,6 +345,7 @@ python3 01-CCE/collect_gemma3_270m_4chip_chunk_results.py
 python3 01-CCE/collect_gemma3_270m_4chip_quality_results.py
 python3 01-CCE/collect_gemma_1b_e2b_cce_transfer_results.py
 python3 01-CCE/collect_gemma_4b_e4b_cce_transfer_results.py
+python3 01-CCE/collect_gemma3_12b_27b_cce_focused_results.py
 ```
 
 The collectors:
@@ -326,6 +366,7 @@ rm -rf 01-CCE/data/gemma3_270m_4chip_chunk/raw
 rm -rf 01-CCE/data/gemma3_270m_4chip_quality/raw
 rm -rf 01-CCE/data/gemma_1b_e2b_cce_transfer/raw
 rm -rf 01-CCE/data/gemma_4b_e4b_cce_transfer/raw
+rm -rf 01-CCE/data/gemma3_12b_27b_cce_focused/raw
 ```
 
 ## Expected Checks
@@ -349,6 +390,11 @@ The rerun should reproduce the following qualitative findings:
   GiB/chip planned HBM and completes under CCE at 15.04 GiB/chip.
 - On `v5litepod-8`, Gemma4 E4B b4/L512 and b8/L256 are CCE-only fits in the
   focused frontier grid.
+- On `v5litepod-8`, Gemma3 12B and 27B still show lower CCE planned HBM, but
+  CCE does not create a new passing shape in the retained focused boundary
+  grid. For example, Gemma3 12B b4/L512 drops from 19.01 to 17.31 GiB/chip and
+  still fails; Gemma3 27B b2/L512 drops from 24.38 to 23.62 GiB/chip and still
+  fails.
 
 Generation note: the CCE LoRA training hook intercepts hidden states in the
 loss path. Before sampling, call the restore path so Tunix generation sees the

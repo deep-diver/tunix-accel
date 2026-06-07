@@ -62,6 +62,26 @@ MODEL_PRESETS = {
         "allow_download": False,
         "enable_gemma4_hf_loader": False,
     },
+    "12b": {
+        "label": "Gemma3 12B",
+        "model_id": "google/gemma-3-12b-it",
+        "model_source": "gcs",
+        "model_path": "gs://gemma-data/checkpoints/gemma3-12b-it",
+        "tokenizer_source": "sentencepiece",
+        "tokenizer_path": "gs://gemma-data/tokenizers/tokenizer_gemma3.model",
+        "allow_download": False,
+        "enable_gemma4_hf_loader": False,
+    },
+    "27b": {
+        "label": "Gemma3 27B",
+        "model_id": "google/gemma-3-27b-it",
+        "model_source": "gcs",
+        "model_path": "gs://gemma-data/checkpoints/gemma3-27b-it",
+        "tokenizer_source": "sentencepiece",
+        "tokenizer_path": "gs://gemma-data/tokenizers/tokenizer_gemma3.model",
+        "allow_download": False,
+        "enable_gemma4_hf_loader": False,
+    },
     "e2b": {
         "label": "Gemma4 E2B",
         "model_id": "google/gemma-4-E2B",
@@ -300,6 +320,8 @@ def command_for_case(
     ])
   if variant == "cce":
     command.append("--allow-autopatch")
+  if args.initialize_distributed:
+    command.append("--initialize-distributed")
   if args.model_download_path:
     command.extend(["--model-download-path", args.model_download_path])
   if args.allow_download:
@@ -549,6 +571,14 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--log-every", type=int, default=1)
   parser.add_argument("--seed", type=int, default=0)
   parser.add_argument("--skip-quality-eval", action="store_true")
+  parser.add_argument(
+      "--initialize-distributed",
+      action="store_true",
+      help=(
+          "Forward --initialize-distributed to the Tunix training subprocess. "
+          "Use when this runner is launched on every host of a TPU pod slice."
+      ),
+  )
   parser.add_argument("--eval-examples", type=int, default=256)
   parser.add_argument("--eval-batches", type=int, default=16)
   parser.add_argument("--generation-examples", type=int, default=32)

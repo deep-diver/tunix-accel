@@ -601,6 +601,22 @@ def create_mesh(jax, args: argparse.Namespace):
   return jax.sharding.Mesh(devices.reshape((fsdp, tp)), ("fsdp", "tp"))
 
 
+def maybe_initialize_distributed(args: argparse.Namespace) -> None:
+  if not args.initialize_distributed:
+    return
+  import jax  # pylint: disable=import-outside-toplevel
+
+  jax.distributed.initialize()
+  print(
+      "jax_distributed_initialized="
+      f"process_index={jax.process_index()} "
+      f"process_count={jax.process_count()} "
+      f"local_devices={jax.local_device_count()} "
+      f"global_devices={jax.device_count()}",
+      flush=True,
+  )
+
+
 def apply_lora_if_requested(model, mesh, args: argparse.Namespace):
   from flax import nnx  # pylint: disable=import-outside-toplevel
   import jax.numpy as jnp  # pylint: disable=import-outside-toplevel
@@ -1441,6 +1457,14 @@ def main() -> None:
   parser.add_argument("--save-checkpoints", action="store_true")
   parser.add_argument("--log-every", type=int, default=1)
   parser.add_argument("--seed", type=int, default=0)
+  parser.add_argument(
+      "--initialize-distributed",
+      action="store_true",
+      help=(
+          "Call jax.distributed.initialize() before model/checkpoint setup. "
+          "Use this when launching on every host of a TPU pod slice."
+      ),
+  )
   parser.add_argument("--outdir", default="02-PACKING/results/gemma-training-default-ce")
   parser.add_argument(
       "--allow-autopatch",
@@ -1449,6 +1473,7 @@ def main() -> None:
   )
   args = parser.parse_args()
 
+  maybe_initialize_distributed(args)
   configure_autopatch(allow_autopatch=args.allow_autopatch)
 
   outdir = Path(args.outdir).expanduser().resolve()

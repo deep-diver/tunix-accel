@@ -1,0 +1,19 @@
+model,batch_size,max_length,variant,status,ok,xla_train_step_gib_per_chip,mean_step_time_sec_excl_first,mesh,tpu,chips
+Gemma3 12B,1,1024,cce,ok,True,12.4,0.6068825480001578,fsdp8/tp1,v5litepod-8,8
+Gemma3 12B,1,1024,default,ok,True,12.91,0.4488248469999689,fsdp8/tp1,v5litepod-8,8
+Gemma3 12B,1,2048,cce,failed,False,20.47,,fsdp8/tp1,v5litepod-8,8
+Gemma3 12B,1,2048,default,failed,False,22.29,,fsdp8/tp1,v5litepod-8,8
+Gemma3 12B,2,512,cce,ok,True,12.64,0.4653984230003516,fsdp8/tp1,v5litepod-8,8
+Gemma3 12B,2,512,default,ok,True,13.14,0.433844666999903,fsdp8/tp1,v5litepod-8,8
+Gemma3 12B,2,1024,cce,failed,False,20.12,,fsdp8/tp1,v5litepod-8,8
+Gemma3 12B,2,1024,default,failed,False,21.92,,fsdp8/tp1,v5litepod-8,8
+Gemma3 12B,4,512,cce,failed,False,17.31,,fsdp8/tp1,v5litepod-8,8
+Gemma3 12B,4,512,default,failed,False,19.01,,fsdp8/tp1,v5litepod-8,8
+Gemma3 27B,1,512,cce,ok,True,14.26,0.524622618999274,fsdp8/tp1,v5litepod-8,8
+Gemma3 27B,1,512,default,ok,True,14.52,0.5153388090002409,fsdp8/tp1,v5litepod-8,8
+Gemma3 27B,1,1024,cce,failed,False,23.82,,fsdp8/tp1,v5litepod-8,8
+Gemma3 27B,1,1024,default,failed,False,24.66,,fsdp8/tp1,v5litepod-8,8
+Gemma3 27B,2,512,cce,failed,False,23.62,,fsdp8/tp1,v5litepod-8,8
+Gemma3 27B,2,512,default,failed,False,24.38,,fsdp8/tp1,v5litepod-8,8
+Gemma3 27B,4,512,cce,failed,False,33.81,,fsdp8/tp1,v5litepod-8,8
+Gemma3 27B,4,512,default,failed,False,35.5,,fsdp8/tp1,v5litepod-8,8

@@ -1,0 +1,3 @@
+artifact,bytes,profile,project,zone,tpu,chips,mesh,note
+data/gemma3_12b_27b_cce_focused/raw_artifacts/gemma-cce-12b-focused-large-frontier-fsdp.tar.gz,1266109,gemma-cce-12b-focused-large-frontier-fsdp,gcp-ml-172005,us-west4-a,v5litepod-8,8,fsdp8/tp1,single-host v5e boundary rerun
+data/gemma3_12b_27b_cce_focused/raw_artifacts/gemma-cce-27b-focused-x8-large-frontier-fsdp.tar.gz,733795,gemma-cce-27b-focused-x8-large-frontier-fsdp,gcp-ml-172005,us-west4-a,v5litepod-8,8,fsdp8/tp1,single-host v5e boundary rerun

@@ -46,7 +46,14 @@ if [[ "${MODEL_SIZE}" == "e2b" && -z "${TUNIX_ACCEL_MODEL_DOWNLOAD_PATH:-}" ]]; 
 fi
 
 run_sweep() {
-  python 01-CCE/run_gemma3_270m_cce_sweep.py --model-size "${MODEL_SIZE}" "$@"
+  local distributed_args=()
+  if [[ "${INITIALIZE_DISTRIBUTED:-0}" == "1" ]]; then
+    distributed_args+=(--initialize-distributed)
+  fi
+  python 01-CCE/run_gemma3_270m_cce_sweep.py \
+    --model-size "${MODEL_SIZE}" \
+    "${distributed_args[@]}" \
+    "$@"
 }
 
 run_mesh_sweep() {
@@ -193,6 +200,56 @@ run_eightchip_quality() {
     --mesh-tp "${tp}" \
     --tpu v5litepod-8 \
     --chips 8 \
+    --force \
+    --outdir "${OUT_BASE}/${suite}"
+}
+
+run_largechip_frontier() {
+  local suite="$1"
+  local fsdp="$2"
+  local tp="$3"
+  local tpu="$4"
+  local chips="$5"
+  run_sweep \
+    --suite "${suite}" \
+    --variants "${FOCUSED_VARIANTS:-default,cce}" \
+    --batch-sizes "${FOCUSED_BATCHES:-1,2,4}" \
+    --contexts "${FOCUSED_CONTEXTS:-512,1024,2048,4096}" \
+    --lora-ranks "${FOCUSED_LORA_RANKS:-16}" \
+    --dataset-mode synthetic \
+    --num-examples "${FOCUSED_NUM_EXAMPLES:-4096}" \
+    --max-steps "${FOCUSED_MAX_STEPS:-2}" \
+    --skip-quality-eval \
+    --mesh-fsdp "${fsdp}" \
+    --mesh-tp "${tp}" \
+    --tpu "${tpu}" \
+    --chips "${chips}" \
+    --force \
+    --outdir "${OUT_BASE}/${suite}"
+}
+
+run_largechip_chunk() {
+  local suite="$1"
+  local fsdp="$2"
+  local tp="$3"
+  local tpu="$4"
+  local chips="$5"
+  run_sweep \
+    --suite "${suite}" \
+    --variants cce \
+    --batch-sizes "${CHUNK_BATCHES:-1}" \
+    --contexts "${CHUNK_CONTEXTS:-1024}" \
+    --lora-ranks "${FOCUSED_LORA_RANKS:-16}" \
+    --token-chunks "${CHUNK_TOKEN_CHUNKS:-128,256,512}" \
+    --vocab-chunks "${CHUNK_VOCAB_CHUNKS:-8192,16384,32768,65536}" \
+    --dataset-mode synthetic \
+    --num-examples "${FOCUSED_NUM_EXAMPLES:-2048}" \
+    --max-steps "${CHUNK_MAX_STEPS:-4}" \
+    --skip-quality-eval \
+    --mesh-fsdp "${fsdp}" \
+    --mesh-tp "${tp}" \
+    --tpu "${tpu}" \
+    --chips "${chips}" \
     --force \
     --outdir "${OUT_BASE}/${suite}"
 }
@@ -532,6 +589,24 @@ case "${PROFILE}" in
 
   eightchip-quality-fsdp8-cce)
     run_eightchip_quality focused_quality_fsdp8_cce cce 8 1
+    ;;
+
+  large-frontier-fsdp)
+    run_largechip_frontier \
+      "focused_frontier_fsdp${LARGE_FSDP:-8}_tp${LARGE_TP:-1}" \
+      "${LARGE_FSDP:-8}" \
+      "${LARGE_TP:-1}" \
+      "${LARGE_TPU:-v5litepod-8}" \
+      "${LARGE_CHIPS:-8}"
+    ;;
+
+  large-chunk-fsdp)
+    run_largechip_chunk \
+      "focused_chunk_fsdp${LARGE_FSDP:-8}_tp${LARGE_TP:-1}" \
+      "${LARGE_FSDP:-8}" \
+      "${LARGE_TP:-1}" \
+      "${LARGE_TPU:-v5litepod-8}" \
+      "${LARGE_CHIPS:-8}"
     ;;
 
   *)

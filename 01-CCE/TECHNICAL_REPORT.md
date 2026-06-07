@@ -5,8 +5,8 @@ JAX/Tunix on Cloud TPU v5e, Cut Cross Entropy removes a real loss-logits memory
 wall without materially changing the training result. Gemma3 270M is the
 exhaustive base case. Gemma3 1B and Gemma4 E2B are transfer checks under the
 same four-chip FSDP setup. Gemma3 4B and Gemma4 E4B are focused larger-model
-checks under an eight-chip FSDP setup, not a replacement for the deeper 270M
-sweep.
+checks under an eight-chip FSDP setup, followed by a 12B/27B boundary check
+that deliberately probes where CCE stops being the dominant lever.
 
 ## Executive Summary
 
@@ -24,8 +24,9 @@ the visible gain is smaller.
 | What is the tradeoff? | Same-shape training is slower. In the 5,000-step b16/L512 run, mean step time rose from 0.106s to 0.196s. |
 | Does it survive multi-chip mesh layouts? | Yes. A follow-up on `v5litepod-4` tested `fsdp=4,tp=1`, `fsdp=2,tp=2`, and `fsdp=1,tp=4`; matched passing rows showed 53-66% per-chip XLA planned HBM reduction and CCE moved the context frontier in all three meshes. |
 | Did multi-chip expose a throughput pitfall? | Yes. The repeated `fsdp=2,tp=2` default chunk row was a real outlier: b16/L512 CCE was about 97x slower than Default CE. Larger TPU chunk settings reduced that same row from 15.37s/step to 0.83s/step without increasing XLA HBM. |
-| Does the pattern transfer beyond 270M? | Yes for the tested FSDP-only rows. On `v5litepod-4`, Gemma3 1B b16 moved from L256 to L512 and b32 moved from no Default CE fit to L256; Gemma4 E2B b4 moved from L256 to L512. On `v5litepod-8`, Gemma3 4B b4 moved from L512 to L1024; Gemma4 E4B b4 moved from L256 to L512 and b8 moved from no Default CE fit to L256. |
-| What TPU was used? | The primary 270M rerun used Cloud TPU `v5litepod-1`, one chip, in `us-west4-a`. Mesh and 1B/E2B transfer checks used `v5litepod-4`, four chips. 4B/E4B focused transfer checks used `v5litepod-8`, eight chips. |
+| Does the pattern transfer beyond 270M? | Yes through the tested 4B/E4B frontier rows. On `v5litepod-4`, Gemma3 1B b16 moved from L256 to L512 and b32 moved from no Default CE fit to L256; Gemma4 E2B b4 moved from L256 to L512. On `v5litepod-8`, Gemma3 4B b4 moved from L512 to L1024; Gemma4 E4B b4 moved from L256 to L512 and b8 moved from no Default CE fit to L256. |
+| Where did it stop moving the frontier? | In the focused Gemma3 12B/27B rerun on the same `v5litepod-8`, CCE still reduced planned HBM but did not create a new passing batch/context shape. At that scale and mesh, other model buffers dominated the peak. |
+| What TPU was used? | The primary 270M rerun used Cloud TPU `v5litepod-1`, one chip, in `us-west4-a`. Mesh and 1B/E2B transfer checks used `v5litepod-4`, four chips. 4B/E4B and 12B/27B focused boundary checks used `v5litepod-8`, eight chips. A final Tunix distributed smoke used `v5litepod-16` for 12B and `v5litepod-32` for 27B. |
 
 The memory metric used throughout the new 270M plots is **max per-chip XLA
 buffer-assignment planned HBM**. This is the number that decides whether a TPU
@@ -34,7 +35,7 @@ reported them, but they are not the primary frontier axis.
 
 ## Claim Boundary
 
-The report supports four claims:
+The report supports five claims:
 
 1. CCE increases the feasible batch/context frontier when the dense loss logits
    tensor is the active memory wall.
@@ -43,8 +44,10 @@ The report supports four claims:
 3. The drop-in Tunix patch works on both single-chip and four-chip Gemma3 270M
    LoRA jobs, but throughput depends on mesh layout and chunk policy.
 4. The same frontier pattern transfers to Gemma3 1B, Gemma4 E2B, Gemma3 4B,
-   and Gemma4 E4B under the tested FSDP-only setups, although those models have
-   less exhaustive coverage than the 270M base case.
+   and Gemma4 E4B under the tested FSDP-only setups.
+5. The Gemma3 12B/27B boundary check is a negative transfer result: CCE still
+   saves HBM, but the saved amount is not enough to move the fit boundary on
+   the tested eight-chip setup.
 
 It does not claim that CCE is always faster, that CCE removes every memory wall,
 or that the OPUS100 samples establish translation quality. Those rows are sanity
@@ -91,9 +94,12 @@ rank sensitivity, chunk tuning, one-step parity, and OPUS100 training runs.
 The four-chip follow-up added repeated mesh timings, frontier sweeps, HLO text
 scans, mixed-mesh chunk tuning, and a 1,000-step OPUS100 parity run.
 
-The transfer checks were split into two tiers. The 1B/E2B tier reused the
+The transfer checks were split into three tiers. The 1B/E2B tier reused the
 four-chip FSDP setup and retained short OPUS100 sanity rows. The 4B/E4B tier
-used an eight-chip FSDP setup and focused on frontier and chunk behavior only.
+used an eight-chip FSDP setup and focused on frontier and chunk behavior. The
+12B/27B tier reused the same eight-chip setup as a boundary check: it asks
+whether CCE alone still moves the fit frontier once the base model is much
+larger.
 
 | Model | TPU / mesh | Synthetic coverage | OPUS100 sanity row |
 | --- | --- | --- | --- |
@@ -101,10 +107,13 @@ used an eight-chip FSDP setup and focused on frontier and chunk behavior only.
 | Gemma4 E2B | `v5litepod-4`, `fsdp=4,tp=1` primary; TP-heavy probe only | frontier grid, chunk grid, mesh probe | b4/L256, 1,000 steps |
 | Gemma3 4B | `v5litepod-8`, `fsdp=8,tp=1` | focused frontier grid, CCE chunk grid | not run |
 | Gemma4 E4B | `v5litepod-8`, `fsdp=8,tp=1` | focused frontier grid, CCE chunk grid | not run |
+| Gemma3 12B | `v5litepod-8`, `fsdp=8,tp=1` | focused boundary grid | not run |
+| Gemma3 27B | `v5litepod-8`, `fsdp=8,tp=1` | focused boundary grid | not run |
 
 Those transfer rows are deliberately smaller than the 270M evidence package.
 Their purpose is to test whether the same memory/frontier story survives model
-scale and Gemma generation, not to re-run every 270M ablation at every size.
+scale and Gemma generation, and then to mark where CCE alone stops being the
+active boundary mover.
 
 ## 1. Frontier: CCE Moves the Fit Boundary
 
@@ -390,6 +399,62 @@ The important practical rule is: use CCE to move the memory wall, then tune
 The memory savings transfer, but the fastest chunk policy does not have to be
 universal.
 
+### Eight-Chip 12B/27B Boundary Rerun
+
+The next question was whether the 4B/E4B pattern continues automatically at
+12B and 27B. We reran a focused boundary grid on the same single-host Cloud TPU
+`v5litepod-8`, eight chips, `fsdp=8,tp=1`, LoRA rank 16, synthetic two-step
+probe. The result is a useful negative boundary: CCE still reduces planned HBM,
+but it no longer creates a new passing shape.
+
+![Gemma3 12B/27B CCE focused frontier](./assets/gemma3_12b_27b_cce_focused_frontier.png)
+
+| Model | Batch | Default CE max context | CCE max context | Result |
+| --- | ---: | ---: | ---: | --- |
+| Gemma3 12B | 1 | 1,024 | 1,024 | no frontier movement |
+| Gemma3 12B | 2 | 512 | 512 | no frontier movement |
+| Gemma3 12B | 4 | none | none | no fit under either variant |
+| Gemma3 27B | 1 | 512 | 512 | no frontier movement |
+| Gemma3 27B | 2 | none | none | no fit under either variant |
+| Gemma3 27B | 4 | none | none | no fit under either variant |
+
+The boundary memory plot shows why. Near the pass/fail edge, CCE saves memory,
+but the saved amount is too small to cross the 16 GiB/chip fit line.
+
+![Gemma3 12B/27B CCE focused HBM](./assets/gemma3_12b_27b_cce_focused_hbm.png)
+
+| Model / shape | Default CE status | Default XLA HBM | CCE status | CCE XLA HBM | Saved |
+| --- | --- | ---: | --- | ---: | ---: |
+| Gemma3 12B b1/L2048 | compile failed | 22.29 GiB/chip | compile failed | 20.47 GiB/chip | 1.82 GiB/chip |
+| Gemma3 12B b2/L1024 | compile failed | 21.92 GiB/chip | compile failed | 20.12 GiB/chip | 1.80 GiB/chip |
+| Gemma3 12B b4/L512 | compile failed | 19.01 GiB/chip | compile failed | 17.31 GiB/chip | 1.70 GiB/chip |
+| Gemma3 27B b1/L1024 | compile failed | 24.66 GiB/chip | compile failed | 23.82 GiB/chip | 0.84 GiB/chip |
+| Gemma3 27B b2/L512 | compile failed | 24.38 GiB/chip | compile failed | 23.62 GiB/chip | 0.76 GiB/chip |
+| Gemma3 27B b4/L512 | compile failed | 35.50 GiB/chip | compile failed | 33.81 GiB/chip | 1.69 GiB/chip |
+
+This does not contradict the 4B/E4B result. It narrows the claim. CCE is most
+visible when the dense loss-logits path is the active peak-memory wall. In the
+12B/27B single-host eight-chip setup, the model graph is already close to or
+over the per-chip HBM limit before the loss path can become the decisive
+buffer. CCE still trims the graph, but it is a partial lever rather than a
+frontier-changing one.
+
+After fixing the runner to call `jax.distributed.initialize()` before Tunix
+model setup, we ran actual multi-host Tunix smoke tests for the larger models.
+These are not frontier sweeps; they only prove that the same drop-in CCE path
+survives real distributed Tunix launch on larger TPU slices.
+
+| Model | TPU | Mesh | Variant | Status | XLA train-step HBM | Local-host runtime peak |
+| --- | --- | --- | --- | --- | ---: | ---: |
+| Gemma3 12B | `v5litepod-16` | `fsdp=16,tp=1` | Default CE | OK | 6.96 GiB/chip | 13.52 GB / 4 local chips |
+| Gemma3 12B | `v5litepod-16` | `fsdp=16,tp=1` | CCE | OK | 6.72 GiB/chip | 13.51 GB / 4 local chips |
+| Gemma3 27B | `v5litepod-32` | `fsdp=32,tp=1` | Default CE | OK | 10.31 GiB/chip | 16.35 GB / 4 local chips |
+| Gemma3 27B | `v5litepod-32` | `fsdp=32,tp=1` | CCE | OK | 10.06 GiB/chip | 16.35 GB / 4 local chips |
+
+The distributed logs confirm `process_count=4`, `global_devices=16` for 12B
+and `process_count=8`, `global_devices=32` for 27B. The runtime peak in this
+table is the artifact host's local four-chip aggregate, not the whole pod.
+
 ## 6. Real EN-FR Training Parity
 
 The systems sweeps prove memory behavior, not usefulness. For a training sanity
@@ -577,6 +642,16 @@ Gemma3 4B / Gemma4 E4B focused transfer package:
 - `01-CCE/assets/gemma_cce_large_transfer_frontier.png`
 - `01-CCE/assets/gemma_cce_large_transfer_pressure.png`
 - `01-CCE/assets/gemma_cce_large_transfer_chunk_tuning.png`
+
+Gemma3 12B / 27B focused boundary package:
+
+- `01-CCE/data/gemma3_12b_27b_cce_focused/run_manifest.csv`
+- `01-CCE/data/gemma3_12b_27b_cce_focused/frontier_runs.csv`
+- `01-CCE/data/gemma3_12b_27b_cce_focused/frontier_summary.csv`
+- `01-CCE/data/gemma3_12b_27b_cce_focused/boundary_hbm_points.csv`
+- `01-CCE/data/gemma3_12b_27b_cce_focused/matched_metrics.csv`
+- `01-CCE/assets/gemma3_12b_27b_cce_focused_frontier.png`
+- `01-CCE/assets/gemma3_12b_27b_cce_focused_hbm.png`
 
 Lower-level audit files are also kept beside those summaries, including
 `frontier_runs.csv`, `rank_sensitivity.csv`, `mesh_runs.csv`, `repeat_runs.csv`,
