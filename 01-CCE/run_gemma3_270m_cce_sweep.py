@@ -29,7 +29,7 @@ from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
-TRAINING_RUNNER = REPO_ROOT / "02-PACKING" / "run_gemma_training_benchmark.py"
+TRAINING_RUNNER = REPO_ROOT / "01-CCE" / "run_gemma_training_benchmark.py"
 
 MODEL_PRESETS = {
     "270m": {

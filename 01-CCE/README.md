@@ -11,6 +11,8 @@ larger-model transfer checks are considered.
 - `GEMMA3_270M_EXPERIMENT_DESIGN.md`: clean rerun design for rebuilding the CCE
   evidence chain around Gemma3 270M before scaling the claim outward.
 - `run_gemma3_270m_cce_sweep.py`: local/TPU sweep runner used by the rerun.
+- `run_gemma_training_benchmark.py`: CCE/default Tunix training runner invoked
+  by the sweep runner.
 - `remote_gemma3_270m_cce_worker.sh`: TPU VM profile wrapper.
 - `collect_gemma3_270m_cce_results.py`: artifact collector and plot generator.
 - `collect_gemma3_270m_mesh_results.py`: four-chip mesh compatibility collector.

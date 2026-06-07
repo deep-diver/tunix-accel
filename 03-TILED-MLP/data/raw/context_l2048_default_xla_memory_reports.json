@@ -1,8 +1,0 @@
-[
-  {
-    "path": "/tmp/xla_4b_l2048_default_mlp/module_0676.jit__train_step.cl_914450892.after_optimizations-memory-usage-report.txt",
-    "bytes": 11122502144,
-    "human": "10.36GiB",
-    "size": 98509
-  }
-]

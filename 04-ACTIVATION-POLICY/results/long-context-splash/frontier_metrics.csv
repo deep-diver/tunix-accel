@@ -1,4 +1,0 @@
-context_length,model,batch_size,lora_rank,mesh_fsdp,mesh_tp,tpu_type,global_chips,per_chip_hbm_gib,xla_train_step_peak_gib_per_chip,hbm_headroom_gib_per_chip,step_time_sec,final_loss,status,patch_stack
-8192,google/gemma-3-4b-it,1,16,16,1,v5litepod-16,16,15.748039245605469,4.592096328735352,11.155942916870117,84.06332862199997,2.2936935424804688,ok,CCE + Tiled MLP + split_offload + Splash Attention
-16384,google/gemma-3-4b-it,1,16,16,1,v5litepod-16,16,15.748039245605469,8.48253583908081,7.265503406524658,116.75841040600017,4.605533599853516,ok,CCE + Tiled MLP + split_offload + Splash Attention
-32768,google/gemma-3-4b-it,1,16,16,1,v5litepod-16,16,15.748039245605469,15.069666862487793,0.6783723831176758,231.48029298600022,4.576807022094727,ok,CCE + Tiled MLP + split_offload + Splash Attention

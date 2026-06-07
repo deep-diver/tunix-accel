@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Subprocess smoke checks for import-time autopatching."""
+"""Subprocess smoke checks for import-time CCE autopatching."""
 
 from __future__ import annotations
 
@@ -20,9 +20,6 @@ def _run_python(code: str, *, env: dict[str, str] | None = None) -> str:
   run_env.pop("TUNIX_ACCEL_CE_PRESET", None)
   run_env.pop("TUNIX_ACCEL_CE_TOKEN_CHUNK", None)
   run_env.pop("TUNIX_ACCEL_CE_VOCAB_CHUNK", None)
-  run_env.pop("TUNIX_ACCEL_DISABLE_TILED_MLP", None)
-  run_env.pop("TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY", None)
-  run_env.pop("TUNIX_ACCEL_ACTIVATION_POLICY", None)
   run_env["PYTHONPATH"] = str(REPO_ROOT)
   if env:
     run_env.update(env)
@@ -38,50 +35,6 @@ def _run_python(code: str, *, env: dict[str, str] | None = None) -> str:
   return result.stdout.strip()
 
 
-def test_gemma3_tiled_mlp_autopatch_installs_on_import() -> None:
-  output = _run_python(
-      """
-      from tunix.models.gemma3 import model as gemma3_model
-      from tunix_accel import gemma3_tiled_mlp
-
-      assert gemma3_tiled_mlp.is_installed()
-      assert getattr(gemma3_model, "_tunix_accel_tiled_mlp_autopatched", False)
-      print("gemma3_tiled_mlp_autopatch=ok")
-      """
-  )
-  assert output.endswith("gemma3_tiled_mlp_autopatch=ok")
-
-
-def test_gemma3_tiled_mlp_autopatch_can_be_disabled() -> None:
-  output = _run_python(
-      """
-      from tunix.models.gemma3 import model as gemma3_model
-      from tunix_accel import gemma3_tiled_mlp
-
-      assert not gemma3_tiled_mlp.is_installed()
-      assert not getattr(gemma3_model, "_tunix_accel_tiled_mlp_autopatched", False)
-      print("gemma3_tiled_mlp_autopatch_disabled=ok")
-      """,
-      env={"TUNIX_ACCEL_DISABLE_TILED_MLP": "1"},
-  )
-  assert output.endswith("gemma3_tiled_mlp_autopatch_disabled=ok")
-
-
-def test_disabling_ce_does_not_disable_gemma3_tiled_mlp() -> None:
-  output = _run_python(
-      """
-      from tunix.models.gemma3 import model as gemma3_model
-      from tunix_accel import gemma3_tiled_mlp
-
-      assert gemma3_tiled_mlp.is_installed()
-      assert getattr(gemma3_model, "_tunix_accel_tiled_mlp_autopatched", False)
-      print("ce_disabled_gemma3_tiled_mlp_autopatch=ok")
-      """,
-      env={"TUNIX_ACCEL_DISABLE_CE": "1"},
-  )
-  assert output.endswith("ce_disabled_gemma3_tiled_mlp_autopatch=ok")
-
-
 def test_cce_autopatch_reads_tpu_large_chunks_preset() -> None:
   output = _run_python(
       """
@@ -93,10 +46,7 @@ def test_cce_autopatch_reads_tpu_large_chunks_preset() -> None:
       assert tunix_patch._STATE.vocab_chunk == 65536
       print("cce_tpu_large_chunks_preset=ok")
       """,
-      env={
-          "TUNIX_ACCEL_DISABLE_TILED_MLP": "1",
-          "TUNIX_ACCEL_CE_PRESET": "tpu_large_chunks",
-      },
+      env={"TUNIX_ACCEL_CE_PRESET": "tpu_large_chunks"},
   )
   assert output.endswith("cce_tpu_large_chunks_preset=ok")
 
@@ -113,7 +63,6 @@ def test_cce_explicit_chunks_override_preset() -> None:
       print("cce_explicit_chunks_override_preset=ok")
       """,
       env={
-          "TUNIX_ACCEL_DISABLE_TILED_MLP": "1",
           "TUNIX_ACCEL_CE_PRESET": "tpu_large_chunks",
           "TUNIX_ACCEL_CE_TOKEN_CHUNK": "256",
           "TUNIX_ACCEL_CE_VOCAB_CHUNK": "32768",
@@ -122,53 +71,15 @@ def test_cce_explicit_chunks_override_preset() -> None:
   assert output.endswith("cce_explicit_chunks_override_preset=ok")
 
 
-def test_gemma3_activation_policy_autopatch_reads_policy_env() -> None:
+def test_cce_autopatch_can_be_disabled() -> None:
   output = _run_python(
       """
-      from tunix.models.gemma3 import model as gemma3_model
-      from tunix_accel import gemma3_activation_policy
+      from tunix.sft import peft_trainer  # noqa: F401
+      from tunix_accel import tunix_patch
 
-      assert gemma3_activation_policy.is_installed()
-      assert getattr(gemma3_model, "_tunix_accel_activation_policy_autopatched", False)
-      assert gemma3_activation_policy._STATE.policy == "split_remat"
-      print("gemma3_activation_policy_autopatch=ok")
+      assert not tunix_patch.is_installed()
+      print("cce_autopatch_disabled=ok")
       """,
-      env={
-          "TUNIX_ACCEL_DISABLE_TILED_MLP": "1",
-          "TUNIX_ACCEL_ACTIVATION_POLICY": "split_remat",
-      },
+      env={"TUNIX_ACCEL_DISABLE_CE": "true"},
   )
-  assert output.endswith("gemma3_activation_policy_autopatch=ok")
-
-
-def test_gemma4_tiled_mlp_autopatch_installs_on_import() -> None:
-  output = _run_python(
-      """
-      from tunix.models.gemma4 import model as gemma4_model
-      from tunix_accel import gemma4_tiled_mlp
-
-      assert gemma4_tiled_mlp.is_installed()
-      assert getattr(gemma4_model, "_tunix_accel_tiled_mlp_autopatched", False)
-      print("gemma4_tiled_mlp_autopatch=ok")
-      """
-  )
-  assert output.endswith("gemma4_tiled_mlp_autopatch=ok")
-
-
-def test_gemma4_activation_policy_autopatch_reads_policy_env() -> None:
-  output = _run_python(
-      """
-      from tunix.models.gemma4 import model as gemma4_model
-      from tunix_accel import gemma4_activation_policy
-
-      assert gemma4_activation_policy.is_installed()
-      assert getattr(gemma4_model, "_tunix_accel_activation_policy_autopatched", False)
-      assert gemma4_activation_policy._STATE.policy == "split_remat"
-      print("gemma4_activation_policy_autopatch=ok")
-      """,
-      env={
-          "TUNIX_ACCEL_DISABLE_TILED_MLP": "1",
-          "TUNIX_ACCEL_ACTIVATION_POLICY": "split_remat",
-      },
-  )
-  assert output.endswith("gemma4_activation_policy_autopatch=ok")
+  assert output.endswith("cce_autopatch_disabled=ok")

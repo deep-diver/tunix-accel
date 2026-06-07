@@ -1,3 +1,0 @@
-variant,model,tpu,chips,mesh,training_mode,lora_rank,batch_size,max_length,steps_recorded,runtime_peak_gib_aggregate,mean_step_time_sec_excl_first,final_train_loss,eval_loss,eval_batches
-default,gemma3-4b-it,v5litepod-8,8,"fsdp=8,tp=1",lora,16,1,2048,500,21.287381649017334,0.23535596853306623,0.55035400390625,1.2500598430633545,64
-tiled,gemma3-4b-it,v5litepod-8,8,"fsdp=8,tp=1",lora,16,1,2048,500,17.923028469085693,0.26491688210420805,0.5738729238510132,1.2327468395233154,64

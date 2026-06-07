@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tunix-accel"
 version = "0.1.0"
-description = "Drop-in acceleration and memory-efficiency patches for JAX/Tunix training"
+description = "Drop-in Cut Cross Entropy support for JAX/Tunix training"
 requires-python = ">=3.11"
 dependencies = []
 

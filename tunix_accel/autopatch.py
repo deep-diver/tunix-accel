@@ -1,9 +1,9 @@
-"""Startup hook for automatic Tunix acceleration patching.
+"""Startup hook for automatic Tunix CCE patching.
 
 This module is imported by the package's `sitecustomize` startup hook when the
-package is installed into a Python environment. It stays intentionally light: it
-registers an import hook and only imports JAX/Tunix-heavy modules when
-supported Tunix modules are actually loaded by user code.
+package is installed into a Python environment. It stays intentionally light:
+it registers an import hook and only imports Tunix/JAX-heavy modules when the
+supported Tunix trainer module is actually loaded by user code.
 """
 
 from __future__ import annotations
@@ -17,24 +17,11 @@ from types import ModuleType
 
 
 CCE_TARGET_MODULE = "tunix.sft.peft_trainer"
-GEMMA3_TARGET_MODULE = "tunix.models.gemma3.model"
-GEMMA4_TARGET_MODULE = "tunix.models.gemma4.model"
 ENV_DISABLE = "TUNIX_ACCEL_DISABLE_AUTOPATCH"
 ENV_DISABLE_CE = "TUNIX_ACCEL_DISABLE_CE"
 ENV_CE_PRESET = "TUNIX_ACCEL_CE_PRESET"
 ENV_TOKEN_CHUNK = "TUNIX_ACCEL_CE_TOKEN_CHUNK"
 ENV_VOCAB_CHUNK = "TUNIX_ACCEL_CE_VOCAB_CHUNK"
-ENV_DISABLE_TILED_MLP = "TUNIX_ACCEL_DISABLE_TILED_MLP"
-ENV_TILED_MLP_TOKEN_CHUNK = "TUNIX_ACCEL_TILED_MLP_TOKEN_CHUNK"
-ENV_TILED_MLP_FALLBACK_ON_LORA = "TUNIX_ACCEL_TILED_MLP_FALLBACK_ON_LORA"
-ENV_TILED_MLP_LORA_ALPHA = "TUNIX_ACCEL_TILED_MLP_LORA_ALPHA"
-ENV_ENABLE_SPLASH_ATTENTION = "TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION"
-ENV_SPLASH_ATTENTION_INTERPRET = "TUNIX_ACCEL_SPLASH_ATTENTION_INTERPRET"
-ENV_DISABLE_ACTIVATION_POLICY = "TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY"
-ENV_ACTIVATION_POLICY = "TUNIX_ACCEL_ACTIVATION_POLICY"
-ENV_ACTIVATION_PREVENT_CSE = "TUNIX_ACCEL_ACTIVATION_PREVENT_CSE"
-ENV_ACTIVATION_OFFLOAD_SRC = "TUNIX_ACCEL_ACTIVATION_OFFLOAD_SRC"
-ENV_ACTIVATION_OFFLOAD_DST = "TUNIX_ACCEL_ACTIVATION_OFFLOAD_DST"
 DEFAULT_TOKEN_CHUNK = 128
 DEFAULT_VOCAB_CHUNK = 8192
 CE_CHUNK_PRESETS = {
@@ -43,11 +30,6 @@ CE_CHUNK_PRESETS = {
     "tpu_large_chunks": (512, 65536),
     "tpu-large-chunks": (512, 65536),
 }
-DEFAULT_TILED_MLP_TOKEN_CHUNK = 128
-DEFAULT_TILED_MLP_LORA_ALPHA = 32.0
-DEFAULT_ACTIVATION_POLICY = "none"
-DEFAULT_ACTIVATION_OFFLOAD_SRC = "device"
-DEFAULT_ACTIVATION_OFFLOAD_DST = "pinned_host"
 
 
 def _env_enabled() -> bool:
@@ -96,47 +78,11 @@ def _vocab_chunk_from_env() -> int:
   return vocab_chunk if vocab_chunk > 0 else preset_vocab_chunk
 
 
-def _tiled_mlp_token_chunk_from_env() -> int:
-  raw = os.environ.get(ENV_TILED_MLP_TOKEN_CHUNK)
-  if not raw:
-    return DEFAULT_TILED_MLP_TOKEN_CHUNK
-  try:
-    token_chunk = int(raw)
-  except ValueError:
-    return DEFAULT_TILED_MLP_TOKEN_CHUNK
-  return token_chunk if token_chunk > 0 else DEFAULT_TILED_MLP_TOKEN_CHUNK
-
-
-def _tiled_mlp_lora_alpha_from_env() -> float:
-  raw = os.environ.get(ENV_TILED_MLP_LORA_ALPHA)
-  if not raw:
-    return DEFAULT_TILED_MLP_LORA_ALPHA
-  try:
-    alpha = float(raw)
-  except ValueError:
-    return DEFAULT_TILED_MLP_LORA_ALPHA
-  return alpha if alpha > 0 else DEFAULT_TILED_MLP_LORA_ALPHA
-
-
-def _activation_policy_from_env() -> str:
-  value = os.environ.get(ENV_ACTIVATION_POLICY, DEFAULT_ACTIVATION_POLICY)
-  value = value.strip().lower()
-  if value in {
-      "none",
-      "layer_remat",
-      "layer_offload",
-      "split_remat",
-      "split_offload",
-  }:
-    return value
-  return DEFAULT_ACTIVATION_POLICY
-
-
 def _patch_cce(module: ModuleType | None = None) -> None:
   if not _env_enabled() or _env_bool(ENV_DISABLE_CE, default=False):
     return
   target = module or sys.modules.get(CCE_TARGET_MODULE)
-  if target is None or getattr(target, "_tunix_accel_autopatched", False):
+  if target is None or getattr(target, "_tunix_accel_cce_autopatched", False):
     return
 
   from tunix_accel import tunix_patch  # pylint: disable=import-outside-toplevel
@@ -145,201 +91,55 @@ def _patch_cce(module: ModuleType | None = None) -> None:
       token_chunk=_token_chunk_from_env(),
       vocab_chunk=_vocab_chunk_from_env(),
   )
-  setattr(target, "_tunix_accel_autopatched", True)
+  setattr(target, "_tunix_accel_cce_autopatched", True)
 
 
-def _patch_gemma3_tiled_mlp(module: ModuleType | None = None) -> None:
-  if not _env_enabled() or _env_bool(ENV_DISABLE_TILED_MLP, default=False):
-    return
-  target = module or sys.modules.get(GEMMA3_TARGET_MODULE)
-  if target is None or getattr(target, "_tunix_accel_tiled_mlp_autopatched", False):
-    return
-
-  from tunix_accel import gemma3_tiled_mlp  # pylint: disable=import-outside-toplevel
-
-  gemma3_tiled_mlp.install(
-      token_chunk=_tiled_mlp_token_chunk_from_env(),
-      fallback_to_original_on_lora=_env_bool(
-          ENV_TILED_MLP_FALLBACK_ON_LORA,
-          default=True,
-      ),
-      lora_alpha=_tiled_mlp_lora_alpha_from_env(),
-  )
-  setattr(target, "_tunix_accel_tiled_mlp_autopatched", True)
+def enable() -> None:
+  """Enables import-time patching and patches already-imported targets."""
+  _patch_cce()
+  if not any(isinstance(finder, _TunixAccelFinder) for finder in sys.meta_path):
+    sys.meta_path.insert(0, _TunixAccelFinder())
 
 
-def _patch_gemma4_tiled_mlp(module: ModuleType | None = None) -> None:
-  if not _env_enabled() or _env_bool(ENV_DISABLE_TILED_MLP, default=False):
-    return
-  target = module or sys.modules.get(GEMMA4_TARGET_MODULE)
-  if target is None or getattr(target, "_tunix_accel_tiled_mlp_autopatched", False):
-    return
+class _TunixAccelLoader(importlib.abc.Loader):
+  """Delegating loader that patches supported modules after normal import."""
 
-  from tunix_accel import gemma4_tiled_mlp  # pylint: disable=import-outside-toplevel
-
-  gemma4_tiled_mlp.install(
-      token_chunk=_tiled_mlp_token_chunk_from_env(),
-      fallback_to_original_on_lora=_env_bool(
-          ENV_TILED_MLP_FALLBACK_ON_LORA,
-          default=True,
-      ),
-      lora_alpha=_tiled_mlp_lora_alpha_from_env(),
-  )
-  setattr(target, "_tunix_accel_tiled_mlp_autopatched", True)
-
-
-def _patch_gemma3_activation_policy(module: ModuleType | None = None) -> None:
-  if (
-      not _env_enabled()
-      or _env_bool(ENV_DISABLE_ACTIVATION_POLICY, default=False)
-  ):
-    return
-  policy = _activation_policy_from_env()
-  if policy == "none":
-    return
-  target = module or sys.modules.get(GEMMA3_TARGET_MODULE)
-  if target is None or getattr(
-      target,
-      "_tunix_accel_activation_policy_autopatched",
-      False,
-  ):
-    return
-
-  from tunix_accel import gemma3_activation_policy  # pylint: disable=import-outside-toplevel
-
-  gemma3_activation_policy.install(
-      policy=policy,
-      prevent_cse=_env_bool(ENV_ACTIVATION_PREVENT_CSE, default=True),
-      offload_src=os.environ.get(
-          ENV_ACTIVATION_OFFLOAD_SRC,
-          DEFAULT_ACTIVATION_OFFLOAD_SRC,
-      ),
-      offload_dst=os.environ.get(
-          ENV_ACTIVATION_OFFLOAD_DST,
-          DEFAULT_ACTIVATION_OFFLOAD_DST,
-      ),
-  )
-  setattr(target, "_tunix_accel_activation_policy_autopatched", True)
-
-
-def _patch_gemma4_activation_policy(module: ModuleType | None = None) -> None:
-  if (
-      not _env_enabled()
-      or _env_bool(ENV_DISABLE_ACTIVATION_POLICY, default=False)
-  ):
-    return
-  policy = _activation_policy_from_env()
-  if policy == "none":
-    return
-  target = module or sys.modules.get(GEMMA4_TARGET_MODULE)
-  if target is None or getattr(
-      target,
-      "_tunix_accel_activation_policy_autopatched",
-      False,
-  ):
-    return
-
-  from tunix_accel import gemma4_activation_policy  # pylint: disable=import-outside-toplevel
-
-  gemma4_activation_policy.install(
-      policy=policy,
-      prevent_cse=_env_bool(ENV_ACTIVATION_PREVENT_CSE, default=True),
-      offload_src=os.environ.get(
-          ENV_ACTIVATION_OFFLOAD_SRC,
-          DEFAULT_ACTIVATION_OFFLOAD_SRC,
-      ),
-      offload_dst=os.environ.get(
-          ENV_ACTIVATION_OFFLOAD_DST,
-          DEFAULT_ACTIVATION_OFFLOAD_DST,
-      ),
-  )
-  setattr(target, "_tunix_accel_activation_policy_autopatched", True)
-
-
-def _patch_gemma3_splash_attention(module: ModuleType | None = None) -> None:
-  if not _env_enabled() or not _env_bool(
-      ENV_ENABLE_SPLASH_ATTENTION,
-      default=False,
-  ):
-    return
-  target = module or sys.modules.get(GEMMA3_TARGET_MODULE)
-  if target is None or getattr(
-      target,
-      "_tunix_accel_splash_attention_autopatched",
-      False,
-  ):
-    return
-
-  from tunix_accel import gemma3_splash_attention  # pylint: disable=import-outside-toplevel
-
-  gemma3_splash_attention.install(
-      interpret=_env_bool(ENV_SPLASH_ATTENTION_INTERPRET, default=False),
-  )
-  setattr(target, "_tunix_accel_splash_attention_autopatched", True)
-
-
-def _patch_gemma3(module: ModuleType | None = None) -> None:
-  _patch_gemma3_splash_attention(module)
-  _patch_gemma3_tiled_mlp(module)
-  _patch_gemma3_activation_policy(module)
-
-
-def _patch_gemma4(module: ModuleType | None = None) -> None:
-  _patch_gemma4_tiled_mlp(module)
-  _patch_gemma4_activation_policy(module)
-
-
-_PATCHERS = {
-    CCE_TARGET_MODULE: _patch_cce,
-    GEMMA3_TARGET_MODULE: _patch_gemma3,
-    GEMMA4_TARGET_MODULE: _patch_gemma4,
-}
-
-
-class _PatchLoader(importlib.abc.Loader):
   def __init__(self, wrapped: importlib.abc.Loader, fullname: str):
     self._wrapped = wrapped
     self._fullname = fullname
 
   def create_module(self, spec):
-    create_module = getattr(self._wrapped, "create_module", None)
-    if create_module is None:
-      return None
-    return create_module(spec)
+    if hasattr(self._wrapped, "create_module"):
+      return self._wrapped.create_module(spec)
+    return None
 
   def exec_module(self, module: ModuleType) -> None:
     self._wrapped.exec_module(module)
-    _PATCHERS[self._fullname](module)
+    if self._fullname == CCE_TARGET_MODULE:
+      _patch_cce(module)
 
 
-class _PatchFinder(importlib.abc.MetaPathFinder):
-  def find_spec(self, fullname, path, target=None):
-    if fullname not in _PATCHERS:
+class _TunixAccelFinder(importlib.abc.MetaPathFinder):
+  """Meta path finder that wraps the Tunix trainer loader."""
+
+  def find_spec(self, fullname: str, path=None, target=None):
+    if fullname != CCE_TARGET_MODULE:
       return None
-
     for finder in sys.meta_path:
       if finder is self:
         continue
-      find_spec = getattr(finder, "find_spec", None)
-      if find_spec is None:
+      if not hasattr(finder, "find_spec"):
         continue
-      spec = find_spec(fullname, path, target)
-      if spec is not None:
-        if spec.loader is not None:
-          spec.loader = _PatchLoader(spec.loader, fullname)
+      spec = finder.find_spec(fullname, path, target)
+      if spec is None or spec.loader is None:
+        continue
+      if isinstance(spec.loader, _TunixAccelLoader):
         return spec
+      if not isinstance(spec.loader, importlib.abc.Loader):
+        return spec
+      spec.loader = _TunixAccelLoader(spec.loader, fullname)
+      return spec
     return None
-
-
-def enable() -> None:
-  """Registers the lazy Tunix import hook, or patches already-loaded modules."""
-  if not _env_enabled():
-    return
-  for target_module, patcher in _PATCHERS.items():
-    if target_module in sys.modules:
-      patcher(sys.modules[target_module])
-  if not any(isinstance(finder, _PatchFinder) for finder in sys.meta_path):
-    sys.meta_path.insert(0, _PatchFinder())
 
 
 enable()

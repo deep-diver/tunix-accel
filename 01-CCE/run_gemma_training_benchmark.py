@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Actual Tunix/Gemma training benchmark for sequence packing.
+"""Actual Tunix/Gemma training benchmark used by the CCE experiments.
 
 Set TUNIX_ACCEL_DISABLE_AUTOPATCH=1 before launching Python so this benchmark
-stays focused on sequence packing and does not pick up repository-level
-autopatches at interpreter startup.
+stays focused on the selected CCE/default-loss variant and does not pick up
+repository-level autopatches at interpreter startup.
 """
 
 from __future__ import annotations
@@ -30,9 +30,6 @@ import numpy as np
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(REPO_ROOT))
-
-from tunix_accel.packing import pack_records  # pylint: disable=wrong-import-position
-
 
 GEMMA3_270M_IT_MODEL_ID = "google/gemma-3-270m-it"
 GEMMA3_270M_IT_GCS = "gs://gemma-data/checkpoints/gemma3-270m-it"
@@ -127,40 +124,19 @@ def collect_accel_status() -> dict[str, Any]:
           "",
       ),
       "disable_ce_env": os.environ.get("TUNIX_ACCEL_DISABLE_CE", ""),
-      "disable_tiled_mlp_env": os.environ.get(
-          "TUNIX_ACCEL_DISABLE_TILED_MLP",
-          "",
-      ),
-      "disable_activation_policy_env": os.environ.get(
-          "TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY",
-          "",
-      ),
-      "activation_policy_env": os.environ.get(
-          "TUNIX_ACCEL_ACTIVATION_POLICY",
-          "",
-      ),
-      "enable_splash_attention_env": os.environ.get(
-          "TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION",
-          "",
-      ),
       "enable_gemma4_hf_loader_env": os.environ.get(
           "TUNIX_ACCEL_ENABLE_GEMMA4_HF_LOADER",
           "",
       ),
+      # Kept for historical CSV-schema compatibility with retained 01 data.
+      "gemma3_tiled_mlp_installed": False,
+      "gemma3_activation_policy_installed": False,
+      "gemma3_splash_attention_installed": False,
+      "gemma4_tiled_mlp_installed": False,
+      "gemma4_activation_policy_installed": False,
   }
   modules = {
       "cce_installed": "tunix_accel.tunix_patch",
-      "gemma3_tiled_mlp_installed": "tunix_accel.gemma3_tiled_mlp",
-      "gemma3_activation_policy_installed": (
-          "tunix_accel.gemma3_activation_policy"
-      ),
-      "gemma3_splash_attention_installed": (
-          "tunix_accel.gemma3_splash_attention"
-      ),
-      "gemma4_tiled_mlp_installed": "tunix_accel.gemma4_tiled_mlp",
-      "gemma4_activation_policy_installed": (
-          "tunix_accel.gemma4_activation_policy"
-      ),
   }
   for key, module_name in modules.items():
     try:
@@ -459,6 +435,14 @@ def make_packed_batches(
     list[dict[str, float | int]],
     dict[str, float | int | str],
 ]:
+  try:
+    from tunix_accel.packing import pack_records  # pylint: disable=import-outside-toplevel
+  except ImportError as exc:
+    raise RuntimeError(
+        "Packed variants are not included in the 01-CCE mainline package. "
+        "Use the archive branch for the sequence-packing workstream."
+    ) from exc
+
   packed = pack_records(
       records,
       max_length=max_length,
@@ -1416,7 +1400,7 @@ def main() -> None:
       default="opus100",
   )
   parser.add_argument("--num-examples", type=int, default=5000)
-  parser.add_argument("--variants", default="unpacked,packed")
+  parser.add_argument("--variants", default="unpacked")
   parser.add_argument("--batch-size", type=int, default=16)
   parser.add_argument("--max-length", type=int, default=512)
   parser.add_argument("--max-steps", type=int, default=50)
@@ -1465,7 +1449,7 @@ def main() -> None:
           "Use this when launching on every host of a TPU pod slice."
       ),
   )
-  parser.add_argument("--outdir", default="02-PACKING/results/gemma-training-default-ce")
+  parser.add_argument("--outdir", default="01-CCE/results/gemma-training-default-ce")
   parser.add_argument(
       "--allow-autopatch",
       action="store_true",

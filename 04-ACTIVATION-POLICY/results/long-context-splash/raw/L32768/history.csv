@@ -1,2 +1,0 @@
-variant,step,loss,step_time_sec,grad_norm,valid_tokens,loss_tokens,capacity_tokens,valid_ratio,loss_ratio,cumulative_valid_tokens,cumulative_loss_tokens,cumulative_step_time_sec
-split_offload,1,4.576807022094727,231.48029298600022,109.0,38,12,32768,0.00115966796875,0.0003662109375,38,12,231.48029298600022
