@@ -6,6 +6,8 @@ ROOT="${ROOT:-$HOME/TUNIX-TRY}"
 OUT_BASE="${OUT_BASE:-/tmp/gemma3-270m-packing}"
 PYTHON_BIN="${PYTHON_BIN:-python3.11}"
 VENV_DIR="${VENV_DIR:-$HOME/.venvs/tunix-packing-270m-py311}"
+CONDA_DIR="${CONDA_DIR:-$HOME/miniconda3}"
+CONDA_ENV_DIR="${CONDA_ENV_DIR:-$HOME/.conda/envs/tunix-packing-270m-py311}"
 
 cd "${ROOT}"
 mkdir -p "${OUT_BASE}"
@@ -14,11 +16,18 @@ ensure_python() {
   if command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
     return
   fi
-  sudo apt-get update
-  sudo apt-get install -y software-properties-common
-  sudo add-apt-repository -y ppa:deadsnakes/ppa
-  sudo apt-get update
-  sudo apt-get install -y python3.11 python3.11-dev python3.11-venv
+  if [[ ! -x "${CONDA_DIR}/bin/conda" ]]; then
+    sudo apt-get update
+    sudo apt-get install -y ca-certificates curl bzip2
+    curl -fsSL \
+      -o /tmp/miniconda.sh \
+      https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+    bash /tmp/miniconda.sh -b -p "${CONDA_DIR}"
+  fi
+  if [[ ! -x "${CONDA_ENV_DIR}/bin/python" ]]; then
+    "${CONDA_DIR}/bin/conda" create -y -p "${CONDA_ENV_DIR}" python=3.11 pip
+  fi
+  PYTHON_BIN="${CONDA_ENV_DIR}/bin/python"
 }
 
 if [[ "${SKIP_INSTALL:-0}" != "1" ]]; then
