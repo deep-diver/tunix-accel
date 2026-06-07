@@ -1,4 +1,4 @@
-"""Startup hook for automatic Tunix CCE patching.
+"""Startup hook for automatic Tunix acceleration patching.
 
 This module is imported by the package's `sitecustomize` startup hook when the
 package is installed into a Python environment. It stays intentionally light:
@@ -94,9 +94,32 @@ def _patch_cce(module: ModuleType | None = None) -> None:
   setattr(target, "_tunix_accel_cce_autopatched", True)
 
 
+def _patch_packing_api(module: ModuleType | None = None) -> None:
+  """Adds inert `packing=` support to Tunix PeftTrainer."""
+  if not _env_enabled():
+    return
+  target = module or sys.modules.get(CCE_TARGET_MODULE)
+  if target is None or getattr(
+      target,
+      "_tunix_accel_packing_api_autopatched",
+      False,
+  ):
+    return
+
+  from tunix_accel import tunix_packing  # pylint: disable=import-outside-toplevel
+
+  tunix_packing.patch_trainer_api(target)
+  setattr(target, "_tunix_accel_packing_api_autopatched", True)
+
+
+def _patch_peft_trainer(module: ModuleType | None = None) -> None:
+  _patch_packing_api(module)
+  _patch_cce(module)
+
+
 def enable() -> None:
   """Enables import-time patching and patches already-imported targets."""
-  _patch_cce()
+  _patch_peft_trainer()
   if not any(isinstance(finder, _TunixAccelFinder) for finder in sys.meta_path):
     sys.meta_path.insert(0, _TunixAccelFinder())
 
@@ -116,7 +139,7 @@ class _TunixAccelLoader(importlib.abc.Loader):
   def exec_module(self, module: ModuleType) -> None:
     self._wrapped.exec_module(module)
     if self._fullname == CCE_TARGET_MODULE:
-      _patch_cce(module)
+      _patch_peft_trainer(module)
 
 
 class _TunixAccelFinder(importlib.abc.MetaPathFinder):

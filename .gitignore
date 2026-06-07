@@ -7,4 +7,5 @@ build/
 checkpoints/
 outputs/
 profiles/
+02-PACKING/results/
 *.log
