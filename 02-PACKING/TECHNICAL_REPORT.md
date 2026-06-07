@@ -93,7 +93,13 @@ gain in this run.
 
 ![Gemma3 270M quality token budget](./assets/gemma3_270m_quality_token_budget.png)
 
-The loss plot also shows the tradeoff. Packing delivers many more target tokens
+The loss figure deliberately has two views. The useful-token view asks what the
+model achieved after seeing a given number of supervised target tokens. The time
+view asks how quickly each input pipeline moved through training. Packing looks
+strongest in the time view because it reaches the same 1.75M target-token budget
+far earlier.
+
+The useful-token view is the tradeoff. Packing delivers many more target tokens
 per optimizer update, so the packed and unpacked loss curves should not be read
 as identical optimizer trajectories. If an experiment needs the same number of
 optimizer updates, the packed run should be scheduled differently. If it needs

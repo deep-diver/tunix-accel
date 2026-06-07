@@ -533,38 +533,80 @@ def plot_quality(
   )
   unpacked_time = histories["unpacked"][-1]["cumulative_step_time_sec"]
 
-  fig, axes = plt.subplots(2, 1, figsize=(10.4, 8.0), height_ratios=[1.35, 1.0])
+  fig = plt.figure(figsize=(12.0, 7.6))
+  grid = fig.add_gridspec(
+      2,
+      2,
+      height_ratios=[1.0, 0.78],
+      hspace=0.42,
+      wspace=0.16,
+  )
 
-  axis = axes[0]
-  setup_axis(axis)
+  token_axis = fig.add_subplot(grid[0, 0])
+  time_axis = fig.add_subplot(grid[0, 1], sharey=token_axis)
+  metric_axis = fig.add_subplot(grid[1, :])
+
+  setup_axis(token_axis)
+  setup_axis(time_axis)
   for variant, color in (("unpacked", BLUE), ("packed", ORANGE)):
     rows = histories[variant]
     tokens = [row["cumulative_loss_tokens"] for row in rows]
+    times = [row["cumulative_step_time_sec"] for row in rows]
     losses = [row["loss"] for row in rows]
     window = 180 if variant == "unpacked" else 45
-    axis.plot(tokens, losses, color=color, alpha=0.12, linewidth=0.7)
-    axis.plot(
+    smoothed = smooth(losses, window)
+    token_axis.plot(tokens, losses, color=color, alpha=0.12, linewidth=0.7)
+    token_axis.plot(
         tokens,
-        smooth(losses, window),
+        smoothed,
         color=color,
         linewidth=2.3,
         label=variant,
     )
-  axis.axvline(unpacked_budget, color=GRAY, linestyle="--", linewidth=1.2)
-  axis.text(
+    time_axis.plot(times, losses, color=color, alpha=0.12, linewidth=0.7)
+    time_axis.plot(
+        times,
+        smoothed,
+        color=color,
+        linewidth=2.3,
+        label=variant,
+    )
+  token_axis.axvline(unpacked_budget, color=GRAY, linestyle="--", linewidth=1.2)
+  token_axis.text(
       unpacked_budget * 1.02,
-      axis.get_ylim()[1] * 0.76,
+      token_axis.get_ylim()[1] * 0.76,
       f"unpacked final budget\n{unpacked_budget / 1e6:.2f}M target tokens",
       fontsize=9,
       color=GRAY,
       ha="left",
   )
-  axis.set_title("Learning View: Compare by Useful Target Tokens", fontweight="bold")
-  axis.set_xlabel("Cumulative target tokens used for loss")
-  axis.set_ylabel("Training loss")
-  axis.legend(frameon=False, loc="upper right")
+  time_axis.axvline(packed_time, color=ORANGE, linestyle="--", linewidth=1.1)
+  time_axis.axvline(unpacked_time, color=BLUE, linestyle="--", linewidth=1.1)
+  time_axis.text(
+      packed_time * 1.08,
+      time_axis.get_ylim()[1] * 0.78,
+      f"packed hits\nsame budget\nat {packed_time:.0f}s",
+      fontsize=9,
+      color=ORANGE,
+      ha="left",
+  )
+  time_axis.text(
+      unpacked_time * 0.98,
+      time_axis.get_ylim()[1] * 0.78,
+      f"unpacked\n{unpacked_time:.0f}s",
+      fontsize=9,
+      color=BLUE,
+      ha="right",
+  )
+  token_axis.set_title("Learning View: Compare by Useful Target Tokens", fontweight="bold")
+  time_axis.set_title("Time View: Compare by Measured Step Time", fontweight="bold")
+  token_axis.set_xlabel("Cumulative target tokens used for loss")
+  time_axis.set_xlabel("Cumulative measured step time, seconds")
+  token_axis.set_ylabel("Training loss")
+  time_axis.tick_params(labelleft=False)
+  token_axis.legend(frameon=False, loc="upper right")
 
-  axis = axes[1]
+  axis = metric_axis
   setup_axis(axis)
   labels = [
       "Time to\n1.75M target tokens",
@@ -633,11 +675,11 @@ def plot_quality(
 
   fig.suptitle(
       "Gemma3 270M Useful-Token Budget Parity: b16/L512 on v5litepod-1",
-      y=1.01,
+      y=0.985,
       fontsize=12,
       color=GRAY,
   )
-  fig.tight_layout()
+  fig.subplots_adjust(left=0.07, right=0.985, top=0.90, bottom=0.10)
   path = ASSETS / "gemma3_270m_quality_token_budget.png"
   fig.savefig(path, dpi=180, bbox_inches="tight")
   plt.close(fig)
