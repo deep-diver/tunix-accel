@@ -1,0 +1,1430 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>01-CCE Technical Report - Tunix Accel</title>
+  <meta name="description" content="Technical reports for Tunix acceleration experiments.">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="./index.html">Tunix Accel Reports</a>
+    <nav class="nav"><a href="./01-cce.html">01-CCE</a><a href="https://github.com/deep-diver/tunix-accel">GitHub</a></nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="eyebrow">Technical Report</div>
+  <h1>Cut Cross Entropy on JAX/Tunix TPU</h1>
+  <p class="subtitle">Loss-logits memory wall, TPU fit frontier, training parity, and transfer evidence from Gemma LoRA SFT experiments.</p>
+</section>
+<main class="layout">
+  <aside class="toc">
+    <div class="toc-title">Contents</div>
+    <div class="toc">
+<ul>
+<li><a href="#executive-summary">Executive Summary</a></li>
+<li><a href="#claim-boundary">Claim Boundary</a></li>
+<li><a href="#why-this-should-work">Why This Should Work</a></li>
+<li><a href="#experiment-scope">Experiment Scope</a></li>
+<li><a href="#1-frontier-cce-moves-the-fit-boundary">1. Frontier: CCE Moves the Fit Boundary</a></li>
+<li><a href="#2-pressure-points-same-shape-different-memory-wall">2. Pressure Points: Same Shape, Different Memory Wall</a></li>
+<li><a href="#3-rank-and-chunk-checks">3. Rank and Chunk Checks</a></li>
+<li><a href="#4-multi-chip-mesh-generalization-and-the-mixed-mesh-outlier">4. Multi-Chip Mesh Generalization and the Mixed-Mesh Outlier</a></li>
+<li><a href="#5-transfer-checks-scaling-the-claim">5. Transfer Checks: Scaling the Claim</a><ul>
+<li><a href="#four-chip-1be2b-checks">Four-Chip 1B/E2B Checks</a></li>
+<li><a href="#eight-chip-4be4b-checks">Eight-Chip 4B/E4B Checks</a></li>
+<li><a href="#eight-chip-12b27b-boundary-rerun">Eight-Chip 12B/27B Boundary Rerun</a></li>
+</ul>
+</li>
+<li><a href="#6-real-en-fr-training-parity">6. Real EN-FR Training Parity</a></li>
+<li><a href="#7-generation-sanity-samples">7. Generation Sanity Samples</a></li>
+<li><a href="#8-interpretation-and-limitations">8. Interpretation and Limitations</a></li>
+<li><a href="#9-reproducibility-artifacts">9. Reproducibility Artifacts</a></li>
+</ul>
+</div>
+
+  </aside>
+  <article class="article">
+    <h1 id="cut-cross-entropy-on-jaxtunix-tpu-loss-logits-memory-wall-and-transfer-evidence">Cut Cross Entropy on JAX/Tunix TPU: Loss-Logits Memory Wall and Transfer Evidence</h1>
+<p>This report makes one narrow, reproducible claim: on Gemma LoRA SFT with
+JAX/Tunix on Cloud TPU v5e, Cut Cross Entropy removes a real loss-logits memory
+wall without materially changing the training result. Gemma3 270M is the
+exhaustive base case. Gemma3 1B and Gemma4 E2B are transfer checks under the
+same four-chip FSDP setup. Gemma3 4B and Gemma4 E4B are focused larger-model
+checks under an eight-chip FSDP setup, followed by a 12B/27B boundary check
+that deliberately probes where CCE stops being the dominant lever.</p>
+<h2 id="executive-summary">Executive Summary</h2>
+<p>The short version is: CCE is not a universal memory optimizer and it is not
+mainly a speed optimization. It is a targeted replacement for the dense
+loss-logits path. When that path is the memory wall, CCE opens batch/context
+shapes that Default CE cannot compile. When another buffer becomes the wall,
+the visible gain is smaller.</p>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Does CCE move the feasible batch/context frontier?</td>
+<td>Yes. On <code>v5litepod-1</code>, b16 moved from L512 to L1024, b32 moved from L256 to L1024, and b64 moved from no Default CE fit to L512 with CCE.</td>
+</tr>
+<tr>
+<td>Does it reduce memory at matched passing shapes?</td>
+<td>Yes. Rank-sensitive matched rows show about 43-68% XLA planned HBM reduction. The OPUS100 b16/L512 run dropped from 12.57 GiB/chip to 4.98 GiB/chip.</td>
+</tr>
+<tr>
+<td>Does real training still behave normally?</td>
+<td>Yes. OPUS100 EN-FR b16/L512 LoRA SFT produced final train loss 0.1731 vs 0.1766 and eval loss 3.4292 vs 3.4251 for Default CE vs CCE.</td>
+</tr>
+<tr>
+<td>What is the tradeoff?</td>
+<td>Same-shape training is slower. In the 5,000-step b16/L512 run, mean step time rose from 0.106s to 0.196s.</td>
+</tr>
+<tr>
+<td>Does it survive multi-chip mesh layouts?</td>
+<td>Yes. A follow-up on <code>v5litepod-4</code> tested <code>fsdp=4,tp=1</code>, <code>fsdp=2,tp=2</code>, and <code>fsdp=1,tp=4</code>; matched passing rows showed 53-66% per-chip XLA planned HBM reduction and CCE moved the context frontier in all three meshes.</td>
+</tr>
+<tr>
+<td>Did multi-chip expose a throughput pitfall?</td>
+<td>Yes. The repeated <code>fsdp=2,tp=2</code> default chunk row was a real outlier: b16/L512 CCE was about 97x slower than Default CE. Larger TPU chunk settings reduced that same row from 15.37s/step to 0.83s/step without increasing XLA HBM.</td>
+</tr>
+<tr>
+<td>Does the pattern transfer beyond 270M?</td>
+<td>Yes through the tested 4B/E4B frontier rows. On <code>v5litepod-4</code>, Gemma3 1B b16 moved from L256 to L512 and b32 moved from no Default CE fit to L256; Gemma4 E2B b4 moved from L256 to L512. On <code>v5litepod-8</code>, Gemma3 4B b4 moved from L512 to L1024; Gemma4 E4B b4 moved from L256 to L512 and b8 moved from no Default CE fit to L256.</td>
+</tr>
+<tr>
+<td>Where did it stop moving the frontier?</td>
+<td>In the focused Gemma3 12B/27B rerun on the same <code>v5litepod-8</code>, CCE still reduced planned HBM but did not create a new passing batch/context shape. At that scale and mesh, other model buffers dominated the peak.</td>
+</tr>
+<tr>
+<td>What TPU was used?</td>
+<td>The primary 270M rerun used Cloud TPU <code>v5litepod-1</code>, one chip, in <code>us-west4-a</code>. Mesh and 1B/E2B transfer checks used <code>v5litepod-4</code>, four chips. 4B/E4B and 12B/27B focused boundary checks used <code>v5litepod-8</code>, eight chips. A final Tunix distributed smoke used <code>v5litepod-16</code> for 12B and <code>v5litepod-32</code> for 27B.</td>
+</tr>
+</tbody>
+</table>
+<p>The memory metric used throughout the new 270M plots is <strong>max per-chip XLA
+buffer-assignment planned HBM</strong>. This is the number that decides whether a TPU
+program fits on a chip. Runtime HBM snapshots are retained when the worker
+reported them, but they are not the primary frontier axis.</p>
+<h2 id="claim-boundary">Claim Boundary</h2>
+<p>The report supports five claims:</p>
+<ol>
+<li>CCE increases the feasible batch/context frontier when the dense loss logits
+   tensor is the active memory wall.</li>
+<li>At matched shapes, CCE can substantially reduce planned HBM while keeping
+   train/eval loss in the same band.</li>
+<li>The drop-in Tunix patch works on both single-chip and four-chip Gemma3 270M
+   LoRA jobs, but throughput depends on mesh layout and chunk policy.</li>
+<li>The same frontier pattern transfers to Gemma3 1B, Gemma4 E2B, Gemma3 4B,
+   and Gemma4 E4B under the tested FSDP-only setups.</li>
+<li>The Gemma3 12B/27B boundary check is a negative transfer result: CCE still
+   saves HBM, but the saved amount is not enough to move the fit boundary on
+   the tested eight-chip setup.</li>
+</ol>
+<p>It does not claim that CCE is always faster, that CCE removes every memory wall,
+or that the OPUS100 samples establish translation quality. Those rows are sanity
+checks for training behavior and generation-path integrity.</p>
+<h2 id="why-this-should-work">Why This Should Work</h2>
+<p>Default language-model cross entropy usually materializes a full logits tensor
+with shape roughly:</p>
+<pre><code class="language-text">batch_size * context_length * vocabulary_size
+</code></pre>
+<p>That tensor grows directly with the two knobs we care about for SFT capacity:
+batch and context length. CCE computes the same cross-entropy objective by
+streaming over token/vocab chunks, avoiding the dense full-vocab logits tensor
+in the loss path.</p>
+<p>The Tunix integration is a drop-in patch for the LoRA training path. During
+training, it intercepts the model output before the tied LM-head decode and
+computes CCE against the frozen LM head. During generation, the original decode
+path is restored before sampling. A regression test now guards that restore
+path because generation must not see the hidden-state intercept.</p>
+<h2 id="experiment-scope">Experiment Scope</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Model</td>
+<td><code>google/gemma-3-270m-it</code></td>
+</tr>
+<tr>
+<td>Training mode</td>
+<td>Tunix PEFT/LoRA</td>
+</tr>
+<tr>
+<td>Main LoRA rank</td>
+<td>16</td>
+</tr>
+<tr>
+<td>TPU</td>
+<td>Cloud TPU <code>v5litepod-1</code>, 1 chip</td>
+</tr>
+<tr>
+<td>Zone</td>
+<td><code>us-west4-a</code></td>
+</tr>
+<tr>
+<td>Systems dataset</td>
+<td>deterministic synthetic SFT records</td>
+</tr>
+<tr>
+<td>Quality dataset</td>
+<td>OPUS100 EN-FR</td>
+</tr>
+<tr>
+<td>Compared variants</td>
+<td>Default CE vs CCE</td>
+</tr>
+<tr>
+<td>Other acceleration patches</td>
+<td>disabled</td>
+</tr>
+<tr>
+<td>Conservative CCE chunks</td>
+<td>token chunk 128, vocab chunk 8192 unless swept</td>
+</tr>
+<tr>
+<td>TPU large-chunk preset</td>
+<td>token chunk 512, vocab chunk 65536 for the mixed-mesh follow-up</td>
+</tr>
+</tbody>
+</table>
+<p>The one-chip rerun produced 307 result rows: frontier sweeps, pressure points,
+rank sensitivity, chunk tuning, one-step parity, and OPUS100 training runs.
+The four-chip follow-up added repeated mesh timings, frontier sweeps, HLO text
+scans, mixed-mesh chunk tuning, and a 1,000-step OPUS100 parity run.</p>
+<p>The transfer checks were split into three tiers. The 1B/E2B tier reused the
+four-chip FSDP setup and retained short OPUS100 sanity rows. The 4B/E4B tier
+used an eight-chip FSDP setup and focused on frontier and chunk behavior. The
+12B/27B tier reused the same eight-chip setup as a boundary check: it asks
+whether CCE alone still moves the fit frontier once the base model is much
+larger.</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>TPU / mesh</th>
+<th>Synthetic coverage</th>
+<th>OPUS100 sanity row</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gemma3 1B</td>
+<td><code>v5litepod-4</code>, <code>fsdp=4,tp=1</code> primary; partial <code>fsdp=2,tp=2</code></td>
+<td>frontier grid, chunk grid</td>
+<td>b8/L512, 1,000 steps</td>
+</tr>
+<tr>
+<td>Gemma4 E2B</td>
+<td><code>v5litepod-4</code>, <code>fsdp=4,tp=1</code> primary; TP-heavy probe only</td>
+<td>frontier grid, chunk grid, mesh probe</td>
+<td>b4/L256, 1,000 steps</td>
+</tr>
+<tr>
+<td>Gemma3 4B</td>
+<td><code>v5litepod-8</code>, <code>fsdp=8,tp=1</code></td>
+<td>focused frontier grid, CCE chunk grid</td>
+<td>not run</td>
+</tr>
+<tr>
+<td>Gemma4 E4B</td>
+<td><code>v5litepod-8</code>, <code>fsdp=8,tp=1</code></td>
+<td>focused frontier grid, CCE chunk grid</td>
+<td>not run</td>
+</tr>
+<tr>
+<td>Gemma3 12B</td>
+<td><code>v5litepod-8</code>, <code>fsdp=8,tp=1</code></td>
+<td>focused boundary grid</td>
+<td>not run</td>
+</tr>
+<tr>
+<td>Gemma3 27B</td>
+<td><code>v5litepod-8</code>, <code>fsdp=8,tp=1</code></td>
+<td>focused boundary grid</td>
+<td>not run</td>
+</tr>
+</tbody>
+</table>
+<p>Those transfer rows are deliberately smaller than the 270M evidence package.
+Their purpose is to test whether the same memory/frontier story survives model
+scale and Gemma generation, and then to mark where CCE alone stops being the
+active boundary mover.</p>
+<h2 id="1-frontier-cce-moves-the-fit-boundary">1. Frontier: CCE Moves the Fit Boundary</h2>
+<p>The frontier sweep is deliberately synthetic. It is not intended to prove
+translation quality. Its job is to isolate the <code>batch * context * vocab</code> memory
+pressure and ask whether the same model, TPU, and LoRA configuration can run
+when only the loss implementation changes.</p>
+<p><img alt="Gemma3 270M CCE frontier" src="./assets/gemma3_270m_cce_frontier.png" /></p>
+<p>The left panel is the practical result: maximum completed context length by
+batch size. The right panel shows the underlying XLA planned HBM pressure for
+representative batch sizes.</p>
+<table>
+<thead>
+<tr>
+<th>Batch</th>
+<th style="text-align: right;">Default CE max context</th>
+<th style="text-align: right;">CCE max context</th>
+<th style="text-align: right;">Gain</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td style="text-align: right;">8,192</td>
+<td style="text-align: right;">8,192</td>
+<td style="text-align: right;">1.0x</td>
+</tr>
+<tr>
+<td>2</td>
+<td style="text-align: right;">4,096</td>
+<td style="text-align: right;">4,096</td>
+<td style="text-align: right;">1.0x</td>
+</tr>
+<tr>
+<td>4</td>
+<td style="text-align: right;">2,048</td>
+<td style="text-align: right;">4,096</td>
+<td style="text-align: right;">2.0x</td>
+</tr>
+<tr>
+<td>8</td>
+<td style="text-align: right;">1,024</td>
+<td style="text-align: right;">2,048</td>
+<td style="text-align: right;">2.0x</td>
+</tr>
+<tr>
+<td>16</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">1,024</td>
+<td style="text-align: right;">2.0x</td>
+</tr>
+<tr>
+<td>32</td>
+<td style="text-align: right;">256</td>
+<td style="text-align: right;">1,024</td>
+<td style="text-align: right;">4.0x</td>
+</tr>
+<tr>
+<td>64</td>
+<td style="text-align: right;">none</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">CCE-only fit</td>
+</tr>
+<tr>
+<td>128</td>
+<td style="text-align: right;">none</td>
+<td style="text-align: right;">256</td>
+<td style="text-align: right;">CCE-only fit</td>
+</tr>
+</tbody>
+</table>
+<p>The important pattern is not that CCE makes every shape fit. It moves the wall.
+For small batches, both variants can still be limited by other model or
+activation buffers. As batch grows, the loss-logits tensor becomes the visible
+wall, and CCE opens shapes that Default CE cannot compile.</p>
+<p>The pass/fail map shows that the sweep did not stop at the first Default CE
+failure. CCE was pushed until it reached its own boundary.</p>
+<p><img alt="Gemma3 270M CCE pass/fail map" src="./assets/gemma3_270m_cce_status_heatmap.png" /></p>
+<h2 id="2-pressure-points-same-shape-different-memory-wall">2. Pressure Points: Same Shape, Different Memory Wall</h2>
+<p>The pressure-point rows keep the sweep readable by focusing on a few
+representative shapes.</p>
+<table>
+<thead>
+<tr>
+<th>Shape</th>
+<th>Default CE</th>
+<th style="text-align: right;">Default XLA HBM</th>
+<th>CCE</th>
+<th style="text-align: right;">CCE XLA HBM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>b16/L512</td>
+<td>OK</td>
+<td style="text-align: right;">12.57 GiB/chip</td>
+<td>OK</td>
+<td style="text-align: right;">4.98 GiB/chip</td>
+</tr>
+<tr>
+<td>b16/L1024</td>
+<td>compile OOM</td>
+<td style="text-align: right;">21.36 GiB/chip</td>
+<td>OK</td>
+<td style="text-align: right;">9.65 GiB/chip</td>
+</tr>
+<tr>
+<td>b32/L512</td>
+<td>compile OOM</td>
+<td style="text-align: right;">21.32 GiB/chip</td>
+<td>OK</td>
+<td style="text-align: right;">8.13 GiB/chip</td>
+</tr>
+<tr>
+<td>b32/L1024</td>
+<td>compile OOM</td>
+<td style="text-align: right;">45.45 GiB/chip</td>
+<td>OK</td>
+<td style="text-align: right;">14.26 GiB/chip</td>
+</tr>
+<tr>
+<td>b64/L512</td>
+<td>compile OOM</td>
+<td style="text-align: right;">57.41 GiB/chip</td>
+<td>OK</td>
+<td style="text-align: right;">14.13 GiB/chip</td>
+</tr>
+<tr>
+<td>b64/L1024</td>
+<td>resource exhausted</td>
+<td style="text-align: right;">88.02 GiB/chip</td>
+<td>compile OOM</td>
+<td style="text-align: right;">25.16 GiB/chip</td>
+</tr>
+</tbody>
+</table>
+<p>This is the cleanest systems result: CCE turns multiple Default CE OOM rows into
+completed TPU train steps, and the remaining CCE failures occur at much higher
+pressure points.</p>
+<h2 id="3-rank-and-chunk-checks">3. Rank and Chunk Checks</h2>
+<p>CCE should mostly track <code>batch * context * vocab</code>, not LoRA rank. The rank sweep
+used ranks 4, 16, and 64 across b8/b16/b32/b64 and L512/L1024/L2048/L4096.
+The frontier pattern was unchanged across ranks: for example, b16 moved from
+L512 to L1024 and b32 moved from no Default CE fit at L512 to CCE fitting
+through L1024.</p>
+<p>The chunk sweep asks a different question: once CCE is enabled, which token/vocab
+chunk sizes are faster at a fixed shape? On b16/L512, all tested chunk pairs
+used roughly the same XLA planned HBM, but step time varied.</p>
+<p><img alt="Gemma3 270M CCE tuning checks" src="./assets/gemma3_270m_cce_tuning.png" /></p>
+<p>The best b16/L512 chunk rows were:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">Token chunk</th>
+<th style="text-align: right;">Vocab chunk</th>
+<th style="text-align: right;">Mean step time</th>
+<th style="text-align: right;">Valid tokens/sec</th>
+<th style="text-align: right;">XLA HBM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">16K</td>
+<td style="text-align: right;">0.141s</td>
+<td style="text-align: right;">12,588</td>
+<td style="text-align: right;">4.98 GiB/chip</td>
+</tr>
+<tr>
+<td style="text-align: right;">256</td>
+<td style="text-align: right;">32K</td>
+<td style="text-align: right;">0.146s</td>
+<td style="text-align: right;">12,134</td>
+<td style="text-align: right;">4.98 GiB/chip</td>
+</tr>
+<tr>
+<td style="text-align: right;">256</td>
+<td style="text-align: right;">16K</td>
+<td style="text-align: right;">0.150s</td>
+<td style="text-align: right;">11,868</td>
+<td style="text-align: right;">4.98 GiB/chip</td>
+</tr>
+<tr>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">4K</td>
+<td style="text-align: right;">0.157s</td>
+<td style="text-align: right;">11,312</td>
+<td style="text-align: right;">4.98 GiB/chip</td>
+</tr>
+</tbody>
+</table>
+<p>The conservative package knobs are <code>128/8192</code> because they are stable across
+shapes. The one-chip sweep suggests that larger token chunks can be faster for
+this particular 270M b16/L512 case, but chunk tuning should be shape-aware. The
+four-chip follow-up below shows why: the best chunk policy can change when the
+mesh changes.</p>
+<h2 id="4-multi-chip-mesh-generalization-and-the-mixed-mesh-outlier">4. Multi-Chip Mesh Generalization and the Mixed-Mesh Outlier</h2>
+<p>The main rerun is intentionally single-chip so that the memory story is easy to
+read. We then checked whether the patch still works when Tunix/JAX shards the
+same Gemma3 270M LoRA job over four TPU chips.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TPU</td>
+<td>Cloud TPU <code>v5litepod-4</code>, 4 chips</td>
+</tr>
+<tr>
+<td>Zone</td>
+<td><code>us-west4-a</code></td>
+</tr>
+<tr>
+<td>Meshes</td>
+<td><code>fsdp=4,tp=1</code>, <code>fsdp=2,tp=2</code>, <code>fsdp=1,tp=4</code></td>
+</tr>
+<tr>
+<td>Repeated timing grid</td>
+<td>batches 16/32, contexts 512/1024</td>
+</tr>
+<tr>
+<td>Frontier grid</td>
+<td>batches 1/4/8/16/32/64/128, contexts 256/512/1024/2048/4096</td>
+</tr>
+<tr>
+<td>Steps</td>
+<td>8 repeated synthetic steps for timing; 2 synthetic steps for frontier</td>
+</tr>
+<tr>
+<td>Other acceleration patches</td>
+<td>disabled</td>
+</tr>
+</tbody>
+</table>
+<p><img alt="Gemma3 270M CCE repeated mesh timing" src="./assets/gemma3_270m_cce_mesh_2x2_repeat.png" /></p>
+<p>The result is not a single-chip artifact. CCE worked in the FSDP-only,
+mixed-FSDP/TP, and TP-only layouts. At b16/L512, all three meshes reduced
+max per-chip XLA planned HBM, but throughput behavior was mesh-specific:</p>
+<table>
+<thead>
+<tr>
+<th>Mesh</th>
+<th style="text-align: right;">Default step</th>
+<th style="text-align: right;">CCE step</th>
+<th style="text-align: right;">CCE multiplier</th>
+<th style="text-align: right;">XLA HBM reduction</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fsdp=4,tp=1</code></td>
+<td style="text-align: right;">0.212s</td>
+<td style="text-align: right;">0.388s</td>
+<td style="text-align: right;">1.83x</td>
+<td style="text-align: right;">65.9%</td>
+</tr>
+<tr>
+<td><code>fsdp=2,tp=2</code></td>
+<td style="text-align: right;">0.158s</td>
+<td style="text-align: right;">15.374s</td>
+<td style="text-align: right;">97.0x</td>
+<td style="text-align: right;">57.5%</td>
+</tr>
+<tr>
+<td><code>fsdp=1,tp=4</code></td>
+<td style="text-align: right;">5.410s</td>
+<td style="text-align: right;">7.390s</td>
+<td style="text-align: right;">1.37x</td>
+<td style="text-align: right;">52.7%</td>
+</tr>
+</tbody>
+</table>
+<p>That table separates three facts that are easy to blur together:</p>
+<ol>
+<li>CCE still saves memory in every tested mesh.</li>
+<li>TP-heavy layouts can be slow even without CCE on this small model.</li>
+<li>The dramatic CCE throughput outlier is local to the mixed <code>fsdp=2,tp=2</code>
+   layout with the conservative default chunk settings.</li>
+</ol>
+<p>The broader four-chip frontier sweep still shows the desired capacity behavior:</p>
+<p><img alt="Gemma3 270M CCE four-chip frontier" src="./assets/gemma3_270m_cce_4chip_frontier.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Mesh</th>
+<th style="text-align: right;">Batch</th>
+<th style="text-align: right;">Default CE max context</th>
+<th style="text-align: right;">CCE max context</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fsdp=4,tp=1</code></td>
+<td style="text-align: right;">16</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">1024</td>
+</tr>
+<tr>
+<td><code>fsdp=4,tp=1</code></td>
+<td style="text-align: right;">32</td>
+<td style="text-align: right;">256</td>
+<td style="text-align: right;">1024</td>
+</tr>
+<tr>
+<td><code>fsdp=4,tp=1</code></td>
+<td style="text-align: right;">64</td>
+<td style="text-align: right;">none</td>
+<td style="text-align: right;">512</td>
+</tr>
+<tr>
+<td><code>fsdp=2,tp=2</code></td>
+<td style="text-align: right;">16</td>
+<td style="text-align: right;">1024</td>
+<td style="text-align: right;">2048</td>
+</tr>
+<tr>
+<td><code>fsdp=2,tp=2</code></td>
+<td style="text-align: right;">64</td>
+<td style="text-align: right;">256</td>
+<td style="text-align: right;">512</td>
+</tr>
+<tr>
+<td><code>fsdp=2,tp=2</code></td>
+<td style="text-align: right;">128</td>
+<td style="text-align: right;">none</td>
+<td style="text-align: right;">512</td>
+</tr>
+<tr>
+<td><code>fsdp=1,tp=4</code></td>
+<td style="text-align: right;">32</td>
+<td style="text-align: right;">1024</td>
+<td style="text-align: right;">2048</td>
+</tr>
+<tr>
+<td><code>fsdp=1,tp=4</code></td>
+<td style="text-align: right;">64</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">1024</td>
+</tr>
+<tr>
+<td><code>fsdp=1,tp=4</code></td>
+<td style="text-align: right;">128</td>
+<td style="text-align: right;">256</td>
+<td style="text-align: right;">512</td>
+</tr>
+</tbody>
+</table>
+<p>To inspect the <code>fsdp=2,tp=2</code> outlier, we kept full train-step XLA dumps and
+scanned the optimized HLO text. This scan is intentionally a coarse compiler
+artifact check, not a full profiler. It did not show a simple collective-count
+explosion large enough to explain the 97x slowdown by itself.</p>
+<p><img alt="Gemma3 270M CCE outlier HLO scan" src="./assets/gemma3_270m_cce_outlier_hlo.png" /></p>
+<p>The more actionable finding came from chunk tuning. The package default
+(<code>token_chunk=128</code>, <code>vocab_chunk=8192</code>) is conservative and portable, but it is
+too fine-grained for this mixed mesh. On <code>fsdp=2,tp=2</code>, b16/L512, increasing
+the chunk size kept XLA HBM at 2.65 GiB/chip while dramatically reducing step
+time:</p>
+<p><img alt="Gemma3 270M CCE four-chip chunk tuning" src="./assets/gemma3_270m_cce_4chip_chunk_tuning.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Shape</th>
+<th style="text-align: right;">Token chunk</th>
+<th style="text-align: right;">Vocab chunk</th>
+<th style="text-align: right;">Mean step time</th>
+<th style="text-align: right;">XLA HBM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>b16/L512</td>
+<td style="text-align: right;">128</td>
+<td style="text-align: right;">8192</td>
+<td style="text-align: right;">15.39s</td>
+<td style="text-align: right;">2.65 GiB/chip</td>
+</tr>
+<tr>
+<td>b16/L512</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">32768</td>
+<td style="text-align: right;">1.27s</td>
+<td style="text-align: right;">2.65 GiB/chip</td>
+</tr>
+<tr>
+<td>b16/L512</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">65536</td>
+<td style="text-align: right;">0.83s</td>
+<td style="text-align: right;">2.65 GiB/chip</td>
+</tr>
+<tr>
+<td>b16/L1024</td>
+<td style="text-align: right;">128</td>
+<td style="text-align: right;">8192</td>
+<td style="text-align: right;">30.83s</td>
+<td style="text-align: right;">5.13 GiB/chip</td>
+</tr>
+<tr>
+<td>b16/L1024</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">32768</td>
+<td style="text-align: right;">2.55s</td>
+<td style="text-align: right;">5.13 GiB/chip</td>
+</tr>
+<tr>
+<td>b16/L1024</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">65536</td>
+<td style="text-align: right;">1.67s</td>
+<td style="text-align: right;">5.13 GiB/chip</td>
+</tr>
+</tbody>
+</table>
+<p>The same grid also gives a one-factor-at-a-time view. At b16/L512, holding
+<code>token_chunk=128</code> fixed and increasing <code>vocab_chunk</code> made the run faster; holding
+<code>vocab_chunk=8192</code> fixed and increasing <code>token_chunk</code> showed the same pattern.
+XLA planned HBM stayed at 2.65 GiB/chip for every row in these two slices.</p>
+<p><img alt="Gemma3 270M CCE chunk axis ablation" src="./assets/gemma3_270m_cce_4chip_chunk_axis_ablation.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Fixed knob</th>
+<th>Swept knob</th>
+<th style="text-align: right;">Step-time range</th>
+<th>Interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>token_chunk=128</code></td>
+<td><code>vocab_chunk=4096 -&gt; 32768</code></td>
+<td style="text-align: right;">30.42s -&gt; 4.11s</td>
+<td>Larger vocab chunks reduced the inner CCE loop count.</td>
+</tr>
+<tr>
+<td><code>vocab_chunk=8192</code></td>
+<td><code>token_chunk=64 -&gt; 512</code></td>
+<td style="text-align: right;">30.46s -&gt; 4.10s</td>
+<td>Larger token chunks reduced the outer CCE loop count.</td>
+</tr>
+</tbody>
+</table>
+<p>So the mixed-mesh slowdown was not caused by only one bad axis. The problematic
+case was excessive chunk granularity: many small token chunks multiplied by many
+small vocab chunks. The larger <code>512/65536</code> preset reduces both loop dimensions,
+which is why it fixes the outlier so strongly.</p>
+<p>The clean interpretation is therefore: CCE is compatible with FSDP/TP sharding,
+and the large mixed-mesh slowdown is mostly a chunk-policy problem rather than a
+correctness or memory failure. The package keeps the conservative <code>128/8192</code>
+default, but adds an opt-in <code>TUNIX_ACCEL_CE_PRESET=tpu_large_chunks</code> shortcut
+for the validated <code>512/65536</code> TPU setting.</p>
+<h2 id="5-transfer-checks-scaling-the-claim">5. Transfer Checks: Scaling the Claim</h2>
+<p>After the 270M base case was complete, we asked whether the same systems claim
+survives larger Gemma models. The transfer checks are intentionally narrower
+than the 270M package: they test whether CCE still moves the fit frontier under
+the chosen mesh, not whether every 270M ablation repeats at every model size.</p>
+<h3 id="four-chip-1be2b-checks">Four-Chip 1B/E2B Checks</h3>
+<p>Gemma3 1B and Gemma4 E2B used <code>v5litepod-4</code>, four chips, with <code>fsdp=4,tp=1</code> as
+the primary mesh.</p>
+<p><img alt="Gemma CCE transfer frontier" src="./assets/gemma_cce_transfer_frontier.png" /></p>
+<p>The transfer result is directionally the same as the 270M result: CCE extends
+the maximum passing context at the same batch size, and the benefit is most
+visible when Default CE hits the loss-logits wall.</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th style="text-align: right;">Batch</th>
+<th style="text-align: right;">Default CE max context</th>
+<th style="text-align: right;">CCE max context</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gemma3 1B</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">1,024</td>
+<td style="text-align: right;">2,048</td>
+</tr>
+<tr>
+<td>Gemma3 1B</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">1,024</td>
+</tr>
+<tr>
+<td>Gemma3 1B</td>
+<td style="text-align: right;">16</td>
+<td style="text-align: right;">256</td>
+<td style="text-align: right;">512</td>
+</tr>
+<tr>
+<td>Gemma3 1B</td>
+<td style="text-align: right;">32</td>
+<td style="text-align: right;">none</td>
+<td style="text-align: right;">256</td>
+</tr>
+<tr>
+<td>Gemma4 E2B</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1,024</td>
+<td style="text-align: right;">2,048</td>
+</tr>
+<tr>
+<td>Gemma4 E2B</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">256</td>
+<td style="text-align: right;">512</td>
+</tr>
+<tr>
+<td>Gemma4 E2B</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">none</td>
+<td style="text-align: right;">256</td>
+</tr>
+</tbody>
+</table>
+<p>For matched OPUS100 sanity runs, CCE again reduced max per-chip XLA planned HBM
+while leaving train/eval loss in the same band. These are 1,000-step sanity rows
+only; they are not translation-quality claims.</p>
+<p><img alt="Gemma CCE transfer quality" src="./assets/gemma_cce_transfer_quality.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Model / shape</th>
+<th style="text-align: right;">Default HBM</th>
+<th style="text-align: right;">CCE HBM</th>
+<th style="text-align: right;">Default step</th>
+<th style="text-align: right;">CCE step</th>
+<th style="text-align: right;">Default final/eval loss</th>
+<th style="text-align: right;">CCE final/eval loss</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gemma3 270M b16/L512</td>
+<td style="text-align: right;">11.29 GiB/chip</td>
+<td style="text-align: right;">3.85 GiB/chip</td>
+<td style="text-align: right;">0.202s</td>
+<td style="text-align: right;">0.379s</td>
+<td style="text-align: right;">1.4906 / 2.1263</td>
+<td style="text-align: right;">1.5500 / 2.1754</td>
+</tr>
+<tr>
+<td>Gemma3 1B b8/L512</td>
+<td style="text-align: right;">9.85 GiB/chip</td>
+<td style="text-align: right;">5.15 GiB/chip</td>
+<td style="text-align: right;">0.217s</td>
+<td style="text-align: right;">0.318s</td>
+<td style="text-align: right;">1.0290 / 1.3959</td>
+<td style="text-align: right;">1.0366 / 1.3906</td>
+</tr>
+<tr>
+<td>Gemma4 E2B b4/L256</td>
+<td style="text-align: right;">9.74 GiB/chip</td>
+<td style="text-align: right;">7.74 GiB/chip</td>
+<td style="text-align: right;">0.193s</td>
+<td style="text-align: right;">0.225s</td>
+<td style="text-align: right;">1.7619 / 0.8294</td>
+<td style="text-align: right;">1.7426 / 0.8956</td>
+</tr>
+</tbody>
+</table>
+<p>The same transfer run also reinforces the chunk-policy lesson from the 270M
+mixed-mesh outlier. At FSDP-only 1B/E2B shapes, chunk tuning has modest upside;
+at the 270M mixed mesh, the conservative <code>128/8192</code> setting was the dominant
+throughput problem. The E2B probe shows the other side of the story: TP-heavy
+meshes can be impractically slow even when the model fits in memory, so larger
+models should prefer FSDP-only unless there is a separate reason to pay for TP.</p>
+<p><img alt="Gemma CCE transfer chunk and mesh" src="./assets/gemma_cce_transfer_chunk_mesh.png" /></p>
+<h3 id="eight-chip-4be4b-checks">Eight-Chip 4B/E4B Checks</h3>
+<p>We then ran a focused larger-model transfer check on <code>v5litepod-8</code>,
+<code>fsdp=8,tp=1</code>. This was not another exhaustive sweep. It kept the same question:
+when the model is larger and the TPU has more chips, do we still see CCE opening
+shapes that Default CE cannot compile?</p>
+<p><img alt="Gemma CCE larger transfer frontier" src="./assets/gemma_cce_large_transfer_frontier.png" /></p>
+<p>The answer is yes, with the expected boundary: CCE helps when the failed shape is
+near the loss-logits wall. It does not magically make every batch/context pair
+fit.</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th style="text-align: right;">Batch</th>
+<th style="text-align: right;">Default CE max context</th>
+<th style="text-align: right;">CCE max context</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gemma3 4B</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">1024</td>
+<td>CCE-only fit at b4/L1024</td>
+</tr>
+<tr>
+<td>Gemma4 E4B</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">256</td>
+<td style="text-align: right;">512</td>
+<td>CCE-only fit at b4/L512</td>
+</tr>
+<tr>
+<td>Gemma4 E4B</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">none</td>
+<td style="text-align: right;">256</td>
+<td>CCE-only fit at b8/L256</td>
+</tr>
+</tbody>
+</table>
+<p>The pressure rows show the same story in the raw memory metric used throughout
+the report: max per-chip XLA buffer-assignment planned HBM.</p>
+<p><img alt="Gemma CCE larger transfer pressure points" src="./assets/gemma_cce_large_transfer_pressure.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Model / shape</th>
+<th>Default CE status</th>
+<th style="text-align: right;">Default XLA HBM</th>
+<th>CCE status</th>
+<th style="text-align: right;">CCE XLA HBM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gemma3 4B b4/L1024</td>
+<td>compile failed</td>
+<td style="text-align: right;">16.54 GiB/chip</td>
+<td>OK</td>
+<td style="text-align: right;">15.04 GiB/chip</td>
+</tr>
+<tr>
+<td>Gemma4 E4B b4/L512</td>
+<td>compile failed</td>
+<td style="text-align: right;">20.30 GiB/chip</td>
+<td>OK</td>
+<td style="text-align: right;">14.53 GiB/chip</td>
+</tr>
+<tr>
+<td>Gemma4 E4B b8/L256</td>
+<td>compile failed</td>
+<td style="text-align: right;">18.66 GiB/chip</td>
+<td>OK</td>
+<td style="text-align: right;">13.60 GiB/chip</td>
+</tr>
+</tbody>
+</table>
+<p>The Gemma3 4B and Gemma4 E4B rows also show why CCE savings should not be
+predicted from parameter count alone. At the same <code>b4/L512</code> shape, Gemma3 4B
+completed under both variants and went from 9.58 to 8.58 GiB/chip. Gemma4 E4B
+failed under Default CE with a 20.30 GiB/chip compile plan, then completed under
+CCE at 14.53 GiB/chip. Both are "4B-class" models, but their XLA graphs do not
+put the same fraction of peak memory in the Default CE loss path. The larger E4B
+gain is therefore not a generic "4B model" rule; it is a graph-specific result
+where the failed Default CE compile plan was dominated more heavily by
+loss-logits buffers.</p>
+<p>The larger-model chunk tuning result is also useful, but more modest than the
+270M mixed-mesh outlier. At these FSDP-only pressure points, chunk choice mostly
+changes step time by a few percent while planned HBM stays in the same band.</p>
+<p><img alt="Gemma CCE larger transfer chunk tuning" src="./assets/gemma_cce_large_transfer_chunk_tuning.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Model / shape</th>
+<th>Conservative chunk</th>
+<th style="text-align: right;">Conservative step</th>
+<th>Fastest tested chunk</th>
+<th style="text-align: right;">Fastest tested step</th>
+<th style="text-align: right;">XLA HBM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gemma3 4B b4/L1024</td>
+<td>128/8192</td>
+<td style="text-align: right;">0.627s</td>
+<td>256/65536</td>
+<td style="text-align: right;">0.588s</td>
+<td style="text-align: right;">14.93-15.04 GiB/chip</td>
+</tr>
+<tr>
+<td>Gemma4 E4B b4/L512</td>
+<td>128/8192</td>
+<td style="text-align: right;">0.634s</td>
+<td>512/16384</td>
+<td style="text-align: right;">0.619s</td>
+<td style="text-align: right;">14.53-14.54 GiB/chip</td>
+</tr>
+</tbody>
+</table>
+<p>The important practical rule is: use CCE to move the memory wall, then tune
+<code>token_chunk</code> and <code>vocab_chunk</code> on the exact model/mesh/shape you intend to run.
+The memory savings transfer, but the fastest chunk policy does not have to be
+universal.</p>
+<h3 id="eight-chip-12b27b-boundary-rerun">Eight-Chip 12B/27B Boundary Rerun</h3>
+<p>The next question was whether the 4B/E4B pattern continues automatically at
+12B and 27B. We reran a focused boundary grid on the same single-host Cloud TPU
+<code>v5litepod-8</code>, eight chips, <code>fsdp=8,tp=1</code>, LoRA rank 16, synthetic two-step
+probe. The result is a useful negative boundary: CCE still reduces planned HBM,
+but it no longer creates a new passing shape.</p>
+<p><img alt="Gemma3 12B/27B CCE focused frontier" src="./assets/gemma3_12b_27b_cce_focused_frontier.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th style="text-align: right;">Batch</th>
+<th style="text-align: right;">Default CE max context</th>
+<th style="text-align: right;">CCE max context</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gemma3 12B</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1,024</td>
+<td style="text-align: right;">1,024</td>
+<td>no frontier movement</td>
+</tr>
+<tr>
+<td>Gemma3 12B</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">512</td>
+<td>no frontier movement</td>
+</tr>
+<tr>
+<td>Gemma3 12B</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">none</td>
+<td style="text-align: right;">none</td>
+<td>no fit under either variant</td>
+</tr>
+<tr>
+<td>Gemma3 27B</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">512</td>
+<td>no frontier movement</td>
+</tr>
+<tr>
+<td>Gemma3 27B</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">none</td>
+<td style="text-align: right;">none</td>
+<td>no fit under either variant</td>
+</tr>
+<tr>
+<td>Gemma3 27B</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">none</td>
+<td style="text-align: right;">none</td>
+<td>no fit under either variant</td>
+</tr>
+</tbody>
+</table>
+<p>The boundary memory plot shows why. Near the pass/fail edge, CCE saves memory,
+but the saved amount is too small to cross the 16 GiB/chip fit line.</p>
+<p><img alt="Gemma3 12B/27B CCE focused HBM" src="./assets/gemma3_12b_27b_cce_focused_hbm.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Model / shape</th>
+<th>Default CE status</th>
+<th style="text-align: right;">Default XLA HBM</th>
+<th>CCE status</th>
+<th style="text-align: right;">CCE XLA HBM</th>
+<th style="text-align: right;">Saved</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gemma3 12B b1/L2048</td>
+<td>compile failed</td>
+<td style="text-align: right;">22.29 GiB/chip</td>
+<td>compile failed</td>
+<td style="text-align: right;">20.47 GiB/chip</td>
+<td style="text-align: right;">1.82 GiB/chip</td>
+</tr>
+<tr>
+<td>Gemma3 12B b2/L1024</td>
+<td>compile failed</td>
+<td style="text-align: right;">21.92 GiB/chip</td>
+<td>compile failed</td>
+<td style="text-align: right;">20.12 GiB/chip</td>
+<td style="text-align: right;">1.80 GiB/chip</td>
+</tr>
+<tr>
+<td>Gemma3 12B b4/L512</td>
+<td>compile failed</td>
+<td style="text-align: right;">19.01 GiB/chip</td>
+<td>compile failed</td>
+<td style="text-align: right;">17.31 GiB/chip</td>
+<td style="text-align: right;">1.70 GiB/chip</td>
+</tr>
+<tr>
+<td>Gemma3 27B b1/L1024</td>
+<td>compile failed</td>
+<td style="text-align: right;">24.66 GiB/chip</td>
+<td>compile failed</td>
+<td style="text-align: right;">23.82 GiB/chip</td>
+<td style="text-align: right;">0.84 GiB/chip</td>
+</tr>
+<tr>
+<td>Gemma3 27B b2/L512</td>
+<td>compile failed</td>
+<td style="text-align: right;">24.38 GiB/chip</td>
+<td>compile failed</td>
+<td style="text-align: right;">23.62 GiB/chip</td>
+<td style="text-align: right;">0.76 GiB/chip</td>
+</tr>
+<tr>
+<td>Gemma3 27B b4/L512</td>
+<td>compile failed</td>
+<td style="text-align: right;">35.50 GiB/chip</td>
+<td>compile failed</td>
+<td style="text-align: right;">33.81 GiB/chip</td>
+<td style="text-align: right;">1.69 GiB/chip</td>
+</tr>
+</tbody>
+</table>
+<p>This does not contradict the 4B/E4B result. It narrows the claim. CCE is most
+visible when the dense loss-logits path is the active peak-memory wall. In the
+12B/27B single-host eight-chip setup, the model graph is already close to or
+over the per-chip HBM limit before the loss path can become the decisive
+buffer. CCE still trims the graph, but it is a partial lever rather than a
+frontier-changing one.</p>
+<p>After fixing the runner to call <code>jax.distributed.initialize()</code> before Tunix
+model setup, we ran actual multi-host Tunix smoke tests for the larger models.
+These are not frontier sweeps; they only prove that the same drop-in CCE path
+survives real distributed Tunix launch on larger TPU slices.</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>TPU</th>
+<th>Mesh</th>
+<th>Variant</th>
+<th>Status</th>
+<th style="text-align: right;">XLA train-step HBM</th>
+<th style="text-align: right;">Local-host runtime peak</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gemma3 12B</td>
+<td><code>v5litepod-16</code></td>
+<td><code>fsdp=16,tp=1</code></td>
+<td>Default CE</td>
+<td>OK</td>
+<td style="text-align: right;">6.96 GiB/chip</td>
+<td style="text-align: right;">13.52 GB / 4 local chips</td>
+</tr>
+<tr>
+<td>Gemma3 12B</td>
+<td><code>v5litepod-16</code></td>
+<td><code>fsdp=16,tp=1</code></td>
+<td>CCE</td>
+<td>OK</td>
+<td style="text-align: right;">6.72 GiB/chip</td>
+<td style="text-align: right;">13.51 GB / 4 local chips</td>
+</tr>
+<tr>
+<td>Gemma3 27B</td>
+<td><code>v5litepod-32</code></td>
+<td><code>fsdp=32,tp=1</code></td>
+<td>Default CE</td>
+<td>OK</td>
+<td style="text-align: right;">10.31 GiB/chip</td>
+<td style="text-align: right;">16.35 GB / 4 local chips</td>
+</tr>
+<tr>
+<td>Gemma3 27B</td>
+<td><code>v5litepod-32</code></td>
+<td><code>fsdp=32,tp=1</code></td>
+<td>CCE</td>
+<td>OK</td>
+<td style="text-align: right;">10.06 GiB/chip</td>
+<td style="text-align: right;">16.35 GB / 4 local chips</td>
+</tr>
+</tbody>
+</table>
+<p>The distributed logs confirm <code>process_count=4</code>, <code>global_devices=16</code> for 12B
+and <code>process_count=8</code>, <code>global_devices=32</code> for 27B. The runtime peak in this
+table is the artifact host's local four-chip aggregate, not the whole pod.</p>
+<h2 id="6-real-en-fr-training-parity">6. Real EN-FR Training Parity</h2>
+<p>The systems sweeps prove memory behavior, not usefulness. For a training sanity
+check, we ran OPUS100 EN-FR LoRA SFT.</p>
+<p>Same-shape A/B:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th style="text-align: right;">Default CE</th>
+<th style="text-align: right;">CCE</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Batch / max length</td>
+<td style="text-align: right;">b16 / L512</td>
+<td style="text-align: right;">b16 / L512</td>
+</tr>
+<tr>
+<td>Steps</td>
+<td style="text-align: right;">5,000</td>
+<td style="text-align: right;">5,000</td>
+</tr>
+<tr>
+<td>LoRA rank</td>
+<td style="text-align: right;">16</td>
+<td style="text-align: right;">16</td>
+</tr>
+<tr>
+<td>Learning rate</td>
+<td style="text-align: right;">2e-4</td>
+<td style="text-align: right;">2e-4</td>
+</tr>
+<tr>
+<td>Final train loss</td>
+<td style="text-align: right;">0.1731</td>
+<td style="text-align: right;">0.1766</td>
+</tr>
+<tr>
+<td>Eval loss</td>
+<td style="text-align: right;">3.4292</td>
+<td style="text-align: right;">3.4251</td>
+</tr>
+<tr>
+<td>16-sample BLEU sanity</td>
+<td style="text-align: right;">16.54</td>
+<td style="text-align: right;">18.72</td>
+</tr>
+<tr>
+<td>16-sample chrF sanity</td>
+<td style="text-align: right;">41.22</td>
+<td style="text-align: right;">40.34</td>
+</tr>
+<tr>
+<td>XLA planned HBM</td>
+<td style="text-align: right;">12.57 GiB/chip</td>
+<td style="text-align: right;">4.98 GiB/chip</td>
+</tr>
+<tr>
+<td>Mean step time</td>
+<td style="text-align: right;">0.106s</td>
+<td style="text-align: right;">0.196s</td>
+</tr>
+<tr>
+<td>Wall time</td>
+<td style="text-align: right;">10.0 min</td>
+<td style="text-align: right;">18.2 min</td>
+</tr>
+</tbody>
+</table>
+<p><img alt="Gemma3 270M OPUS100 EN-FR parity" src="./assets/gemma3_270m_cce_quality.png" /></p>
+<p>The loss curves follow the same trajectory. The normalized metric panel shows
+the tradeoff clearly: much lower planned HBM, similar train/eval loss, and
+slower same-shape steps.</p>
+<p>BLEU and chrF here are deliberately labeled as sanity metrics. They use 16
+evaluation examples, so they are useful for catching obvious generation
+breakage, not for making a translation-quality claim.</p>
+<p>We also repeated a shorter 1,000-step OPUS100 run on the four-chip FSDP-only
+mesh to check that sharded training behaves normally:</p>
+<p><img alt="Gemma3 270M CCE four-chip OPUS100 parity" src="./assets/gemma3_270m_cce_4chip_quality.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th style="text-align: right;">Default CE</th>
+<th style="text-align: right;">CCE</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TPU / mesh</td>
+<td style="text-align: right;"><code>v5litepod-4</code>, <code>fsdp=4,tp=1</code></td>
+<td style="text-align: right;"><code>v5litepod-4</code>, <code>fsdp=4,tp=1</code></td>
+</tr>
+<tr>
+<td>Batch / max length</td>
+<td style="text-align: right;">b16 / L512</td>
+<td style="text-align: right;">b16 / L512</td>
+</tr>
+<tr>
+<td>Steps</td>
+<td style="text-align: right;">1,000</td>
+<td style="text-align: right;">1,000</td>
+</tr>
+<tr>
+<td>Final train loss</td>
+<td style="text-align: right;">1.4906</td>
+<td style="text-align: right;">1.5500</td>
+</tr>
+<tr>
+<td>Eval loss</td>
+<td style="text-align: right;">2.1263</td>
+<td style="text-align: right;">2.1754</td>
+</tr>
+<tr>
+<td>XLA planned HBM</td>
+<td style="text-align: right;">11.29 GiB/chip</td>
+<td style="text-align: right;">3.85 GiB/chip</td>
+</tr>
+<tr>
+<td>Mean step time</td>
+<td style="text-align: right;">0.202s</td>
+<td style="text-align: right;">0.379s</td>
+</tr>
+</tbody>
+</table>
+<p>This is not a replacement for the longer one-chip 5,000-step parity result.
+Its purpose is narrower: the same CCE patch trains normally under the four-chip
+FSDP sharding setup while preserving the expected memory/speed tradeoff.</p>
+<p>We also ran a CCE capacity row: b64/L512 for 1,250 steps, matching the rough
+token budget of b16/L512 for 5,000 steps. It fit at 14.13 GiB/chip and finished
+in 19.2 minutes. That row did not create a speed win in this setup; it mainly
+shows that CCE can spend the saved memory on a much larger batch.</p>
+<h2 id="7-generation-sanity-samples">7. Generation Sanity Samples</h2>
+<p>The restored generation path produced normal text for both variants. The
+outputs below are not polished translation results; the point is narrower:
+after the same training recipe, CCE and Default CE are in the same qualitative
+band and generation no longer sees the hidden-state intercept used by the loss
+patch.</p>
+<p>Sample 1</p>
+<ul>
+<li>EN: They met without me.</li>
+<li>Reference: Ils se sont rencontrés sans moi.</li>
+<li>Default CE: - Ils ne sont pas venus pour moi.</li>
+<li>CCE: Ils ne sont pas venus sans que je ne soit en aware.</li>
+</ul>
+<p>Sample 2</p>
+<ul>
+<li>EN: Pay cash week .</li>
+<li>Reference: J'ai payé en liquide pour la semaine.</li>
+<li>Default CE: Pay week .</li>
+<li>CCE: Paye de la semaine.</li>
+</ul>
+<p>Sample 3</p>
+<ul>
+<li>EN: The certifrcate can be printed in one or more of the languages of the
+  Convention andshould be completed in one of these languages.</li>
+<li>Reference: Le certificat peut être imprimé dans une ou plusieurs langues de
+  la convention et doit être complété dans l'une de ces langues.</li>
+<li>Default CE: La certificat peut être imprimé dans un des langues de la
+  Convention et complété dans une des langue</li>
+<li>CCE: La certificatabilité peut être imprimée dans une ou des langues de la
+  Convention et peut être compli</li>
+</ul>
+<p>Sample 4</p>
+<ul>
+<li>EN: The other issue, which is of enormous significance, is the right to the
+  veto.</li>
+<li>Reference: L'autre question, d'une portée énorme, est le droit de veto.</li>
+<li>Default CE: L'autre aspect important du droit à veto, qui est de grande
+  importance, est le droit à l'apanche.</li>
+<li>CCE: Encore heureux, on questionne aussi le droit à la proposition, à cette
+  aussi, du autre facteur qui rend cette session si importante : l'énoncé de
+  fait du veto.</li>
+</ul>
+<p>Sample 5</p>
+<ul>
+<li>EN: Therefore, let me summarize, at least from the vantage point of one
+  Finance Minister.</li>
+<li>Reference: Par conséquent, permettez-moi d'en résumer la teneur, à tout le
+  moins en tant que ministre des finances.</li>
+<li>Default CE: Par conséquent, je veux vous rappeler, d'un point de vue
+  financier.</li>
+<li>CCE: Par conséquent, je veux te rappeler au moins l'angle de l'examinateur.</li>
+</ul>
+<p>The complete 32-row side-by-side sample file is retained as
+<code>01-CCE/data/gemma3_270m_full_cce/generation_samples.jsonl</code>.</p>
+<h2 id="8-interpretation-and-limitations">8. Interpretation and Limitations</h2>
+<p>CCE is a strong memory lever when the loss logits are a dominant tensor. That is
+why the effect becomes clearer as batch and context grow. It is not a universal
+memory solution: after CCE removes the dense logits tensor, the next wall can be
+activations, attention, model state, sharding layout, or compile-time buffer
+planning.</p>
+<p>The tradeoff is also real. CCE streams reductions instead of doing one dense
+logits computation, so same-shape step time can increase. On the 270M b16/L512
+quality run, the slowdown was about 1.85x. The value of CCE is therefore not
+"always faster." The value is "more trainable shapes before OOM," and sometimes
+that extra capacity may be worth the slower step.</p>
+<p>The mesh check adds one more caveat: memory savings transfer across FSDP/TP
+layouts, but throughput does not transfer automatically. TP-heavy layouts can
+make a small model communication-bound, and conservative chunk settings can make
+mixed FSDP/TP layouts much slower than necessary. The right comparison is
+therefore always same-model, same-mesh, Default CE versus CCE, with chunk policy
+recorded as part of the system configuration.</p>
+<h2 id="9-reproducibility-artifacts">9. Reproducibility Artifacts</h2>
+<p>The retained files are intentionally compact: enough to redraw the report and
+audit every claim, without keeping extracted TPU dumps or checkpoints.</p>
+<p>Single-chip evidence package:</p>
+<ul>
+<li><code>01-CCE/data/gemma3_270m_full_cce/run_manifest.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_full_cce/all_runs.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_full_cce/frontier_summary.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_full_cce/pressure_points.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_full_cce/rank_frontier_summary.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_full_cce/chunk_tuning.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_full_cce/training_history.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_full_cce/training_summary.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_full_cce/generation_metrics.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_full_cce/generation_samples.jsonl</code></li>
+<li><code>01-CCE/data/gemma3_270m_full_cce/oom_events.csv</code></li>
+</ul>
+<p>Four-chip mesh evidence package:</p>
+<ul>
+<li><code>01-CCE/data/gemma3_270m_mesh_cce/mesh_summary.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_mesh_cce/matched_memory.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_mesh_cce_repeat/repeat_summary.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_4chip_frontier/frontier_summary.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_outlier_hlo/hlo_op_counts.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_4chip_chunk/chunk_summary.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_4chip_chunk/chunk_axis_ablation.csv</code></li>
+<li><code>01-CCE/data/gemma3_270m_4chip_quality/training_summary.csv</code></li>
+</ul>
+<p>Gemma3 1B / Gemma4 E2B transfer package:</p>
+<ul>
+<li><code>01-CCE/data/gemma_1b_e2b_cce_transfer/run_manifest.csv</code></li>
+<li><code>01-CCE/data/gemma_1b_e2b_cce_transfer/transfer_runs.csv</code></li>
+<li><code>01-CCE/data/gemma_1b_e2b_cce_transfer/frontier_summary.csv</code></li>
+<li><code>01-CCE/data/gemma_1b_e2b_cce_transfer/matched_metrics.csv</code></li>
+<li><code>01-CCE/data/gemma_1b_e2b_cce_transfer/chunk_summary.csv</code></li>
+<li><code>01-CCE/data/gemma_1b_e2b_cce_transfer/training_summary.csv</code></li>
+<li><code>01-CCE/data/gemma_1b_e2b_cce_transfer/training_history.csv</code></li>
+<li><code>01-CCE/assets/gemma_cce_transfer_frontier.png</code></li>
+<li><code>01-CCE/assets/gemma_cce_transfer_quality.png</code></li>
+<li><code>01-CCE/assets/gemma_cce_transfer_chunk_mesh.png</code></li>
+</ul>
+<p>Gemma3 4B / Gemma4 E4B focused transfer package:</p>
+<ul>
+<li><code>01-CCE/data/gemma_4b_e4b_cce_transfer/run_manifest.csv</code></li>
+<li><code>01-CCE/data/gemma_4b_e4b_cce_transfer/transfer_runs.csv</code></li>
+<li><code>01-CCE/data/gemma_4b_e4b_cce_transfer/frontier_summary.csv</code></li>
+<li><code>01-CCE/data/gemma_4b_e4b_cce_transfer/matched_metrics.csv</code></li>
+<li><code>01-CCE/data/gemma_4b_e4b_cce_transfer/pressure_points.csv</code></li>
+<li><code>01-CCE/data/gemma_4b_e4b_cce_transfer/chunk_summary.csv</code></li>
+<li><code>01-CCE/assets/gemma_cce_large_transfer_frontier.png</code></li>
+<li><code>01-CCE/assets/gemma_cce_large_transfer_pressure.png</code></li>
+<li><code>01-CCE/assets/gemma_cce_large_transfer_chunk_tuning.png</code></li>
+</ul>
+<p>Gemma3 12B / 27B focused boundary package:</p>
+<ul>
+<li><code>01-CCE/data/gemma3_12b_27b_cce_focused/run_manifest.csv</code></li>
+<li><code>01-CCE/data/gemma3_12b_27b_cce_focused/frontier_runs.csv</code></li>
+<li><code>01-CCE/data/gemma3_12b_27b_cce_focused/frontier_summary.csv</code></li>
+<li><code>01-CCE/data/gemma3_12b_27b_cce_focused/boundary_hbm_points.csv</code></li>
+<li><code>01-CCE/data/gemma3_12b_27b_cce_focused/matched_metrics.csv</code></li>
+<li><code>01-CCE/assets/gemma3_12b_27b_cce_focused_frontier.png</code></li>
+<li><code>01-CCE/assets/gemma3_12b_27b_cce_focused_hbm.png</code></li>
+</ul>
+<p>Lower-level audit files are also kept beside those summaries, including
+<code>frontier_runs.csv</code>, <code>rank_sensitivity.csv</code>, <code>mesh_runs.csv</code>, <code>repeat_runs.csv</code>,
+and per-run manifests. Compressed raw worker artifacts are retained under the
+corresponding <code>raw_artifacts/</code> directories. Extracted <code>raw/</code> directories are
+reproducible from those tarballs and should not be committed.</p>
+  </article>
+</main>
+<footer class="footer"><div class="footer-inner">Generated from <code>01-CCE/TECHNICAL_REPORT.md</code>.</div></footer>
+</body>
+</html>
