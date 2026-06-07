@@ -24,6 +24,12 @@ ensure_python() {
       https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
     bash /tmp/miniconda.sh -b -p "${CONDA_DIR}"
   fi
+  "${CONDA_DIR}/bin/conda" tos accept \
+    --override-channels \
+    --channel https://repo.anaconda.com/pkgs/main || true
+  "${CONDA_DIR}/bin/conda" tos accept \
+    --override-channels \
+    --channel https://repo.anaconda.com/pkgs/r || true
   if [[ ! -x "${CONDA_ENV_DIR}/bin/python" ]]; then
     "${CONDA_DIR}/bin/conda" create -y -p "${CONDA_ENV_DIR}" python=3.11 pip
   fi
