@@ -1,22 +1,21 @@
-# Sequence Packing on JAX/Tunix TPU: Useful-Token Density, Not Shape Memory
+# Sequence Packing on JAX/Tunix TPU: Turning Padding Into Useful Tokens
 
 This report makes one deliberately narrow claim: for Gemma3 270M LoRA SFT on
 JAX/Tunix, sequence packing turns padding-heavy fixed rows into useful target
-tokens without changing the fixed-shape TPU memory frontier. It is a data
-density and useful-token-throughput optimization, not a replacement for CCE,
-activation-memory work, or larger TPU meshes.
+tokens. It is a data-density and useful-token-throughput optimization, not a
+fixed-shape memory optimization.
 
 ## Executive Summary
 
 | Question | Result |
 | --- | --- |
 | What is being optimized? | Padding waste. Packing combines multiple short SFT examples into one fixed-length row while preserving per-example positions and block-causal attention. |
-| Does it reduce fixed-shape XLA planned HBM? | No. Passing and failing shapes had nearly identical planned HBM for packed and unpacked variants. |
+| How much padding waste was available? | With the Gemma tokenizer and batch 16, fixed unpacked density fell from 24.9% at L256 to 3.2% at L2048, while packed density stayed around 98.6-99.8%. |
 | Does it improve useful-token throughput? | Yes. On passing short runs, target-token throughput improved by 21.2x to 40.1x. |
 | Does same-shape step time change? | Barely in this setup. Packed/unpacked step-time ratios were 0.982x, 1.006x, and 1.004x for the passing matched shapes. |
-| What is the TPU fit boundary? | On `v5litepod-1`, b8/L512, b8/L1024, and b16/L512 compiled for both variants. b16/L1024 and all tested b32 shapes failed for both variants. |
 | Does useful-token training finish faster? | Yes for token budget. Packed reached the unpacked run's 1.75M target-token budget at step 528 in 88s of cumulative step time, versus 5,000 unpacked steps in 564s. |
 | Is the optimizer trajectory identical? | No. Packing changes the number of target tokens per optimizer update. Loss should be compared by useful tokens and interpreted with that optimizer-step difference in mind. |
+| What is the memory claim? | There is no memory-saving claim. Planned HBM rows are retained only as a negative control showing that packing does not move the fixed-shape fit frontier. |
 
 ## Experiment Scope
 
@@ -60,34 +59,7 @@ training content.
 | 1024 | 6.3% | 37.1% | 99.6% | 15.8x |
 | 2048 | 3.2% | 36.9% | 99.8% | 31.6x |
 
-## 2. Packing Does Not Move the TPU Fit Frontier
-
-The short TPU matrix tested batch sizes 8, 16, and 32 with max lengths 512 and
-1024 for both packed and unpacked input pipelines. Each case attempted 50 LoRA
-SFT steps with quality eval disabled.
-
-![Gemma3 270M TPU fit frontier](./assets/gemma3_270m_tpu_fit_frontier.png)
-
-The result is exactly what the mechanism predicts. Packing changes token
-layout and masks inside the row, but it does not change `(batch, length)`.
-Therefore the planned HBM footprint remains effectively the same for packed and
-unpacked cases.
-
-| Shape | Unpacked status / XLA HBM | Packed status / XLA HBM |
-| --- | ---: | ---: |
-| b8/L512 | OK / 6.85 GiB/chip | OK / 6.85 GiB/chip |
-| b8/L1024 | OK / 13.10 GiB/chip | OK / 13.11 GiB/chip |
-| b16/L512 | OK / 12.57 GiB/chip | OK / 12.57 GiB/chip |
-| b16/L1024 | OOM / 21.36 GiB/chip | OOM / 21.39 GiB/chip |
-| b32/L512 | OOM / 21.32 GiB/chip | OOM / 21.35 GiB/chip |
-| b32/L1024 | OOM / 45.45 GiB/chip | OOM / 45.51 GiB/chip |
-
-This is a useful negative result. It prevents the report from accidentally
-selling packing as a memory-wall fix. If the desired shape cannot compile
-because CE logits or attention activations exceed HBM, packing alone will not
-make that shape fit.
-
-## 3. The Throughput Gain Is Real When the Shape Fits
+## 2. The Throughput Gain Is Real When the Shape Fits
 
 For the passing matched shapes, step time stayed in the same band while
 target-token throughput increased sharply.
@@ -105,7 +77,7 @@ target-token density is especially low at that shape. The model is doing about
 the same fixed-shape work either way; packed batches simply waste far fewer
 positions.
 
-## 4. Useful-Token Budget View
+## 3. Useful-Token Budget View
 
 The quality sanity run used b16/L512 for both variants:
 
@@ -130,6 +102,31 @@ the same useful-token budget, packing can reach that budget much faster.
 The eval losses are retained only as a sanity check that both jobs completed
 normal Tunix training and evaluation. They are not presented as a translation
 quality benchmark.
+
+## 4. Non-Claim Check: Same Shape, Same Planned HBM
+
+The short TPU matrix also records planned HBM, but only as a guardrail. Packing
+changes token layout and masks inside a fixed row; it does not change
+`(batch, length)`. Therefore the planned HBM footprint should remain the same.
+
+![Gemma3 270M TPU fit frontier](./assets/gemma3_270m_tpu_fit_frontier.png)
+
+That is what happened. Passing and failing shapes had nearly identical planned
+HBM for packed and unpacked variants.
+
+| Shape | Unpacked status / XLA HBM | Packed status / XLA HBM |
+| --- | ---: | ---: |
+| b8/L512 | OK / 6.85 GiB/chip | OK / 6.85 GiB/chip |
+| b8/L1024 | OK / 13.10 GiB/chip | OK / 13.11 GiB/chip |
+| b16/L512 | OK / 12.57 GiB/chip | OK / 12.57 GiB/chip |
+| b16/L1024 | OOM / 21.36 GiB/chip | OOM / 21.39 GiB/chip |
+| b32/L512 | OOM / 21.32 GiB/chip | OOM / 21.35 GiB/chip |
+| b32/L1024 | OOM / 45.45 GiB/chip | OOM / 45.51 GiB/chip |
+
+This section exists to bound the claim. If the desired shape cannot compile
+because CE logits or attention activations exceed HBM, packing alone will not
+make that shape fit. That job belongs to memory-path optimizations such as CCE
+or activation-memory work.
 
 ## 5. Implementation Notes
 
@@ -167,9 +164,10 @@ The clean message is:
 
 - Use packing when SFT examples are short relative to the chosen max length.
 - Expect useful-token throughput to rise roughly with target-token density.
-- Do not expect packing to move the fixed-shape HBM frontier.
 - Treat optimizer-step parity and useful-token parity as different experiment
   designs.
+- Do not use packing as a memory-wall fix; the planned-HBM rows are included
+  only to prove that boundary.
 
 In other words, packing is the right lever for padding waste. It is not the
 right lever for dense loss logits, attention activation memory, or model-state

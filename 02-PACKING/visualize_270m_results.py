@@ -415,7 +415,10 @@ def plot_fit_frontier(short_rows: list[dict[str, Any]]) -> Path:
   axis.set_xticklabels([f"b{b}\nL{l}" for b, l in shapes])
   axis.set_ylim(0, 50)
   axis.set_ylabel("XLA train-step planned HBM, GiB/chip")
-  axis.set_title("Packing Does Not Move the Fixed-Shape Fit Frontier", fontweight="bold")
+  axis.set_title(
+      "Non-Claim Check: Same Shape, Same Planned HBM",
+      fontweight="bold",
+  )
   axis.legend(
       handles=[
           Patch(facecolor=BLUE, label="unpacked"),
@@ -567,7 +570,6 @@ def plot_quality(
       "Time to\n1.75M target tokens",
       "Run-end\ntarget tokens",
       "Run-end\neval loss",
-      "Train-step\nplanned HBM",
   ]
   unpacked_summary = next(row for row in quality_rows if row["variant"] == "unpacked")
   packed_summary = next(row for row in quality_rows if row["variant"] == "packed")
@@ -576,13 +578,11 @@ def plot_quality(
           unpacked_time,
           unpacked_summary["final_cumulative_loss_tokens"] / 1e6,
           unpacked_summary["eval_loss"],
-          unpacked_summary["xla_train_step_gib_per_chip"],
       ],
       "packed": [
           packed_time,
           packed_summary["final_cumulative_loss_tokens"] / 1e6,
           packed_summary["eval_loss"],
-          packed_summary["xla_train_step_gib_per_chip"],
       ],
   }
   normalizers = raw_values["unpacked"]
@@ -613,10 +613,8 @@ def plot_quality(
         text = f"{raw:.0f}s"
       elif idx == 1:
         text = f"{raw:.2f}M"
-      elif idx == 2:
-        text = f"{raw:.2f}"
       else:
-        text = f"{raw:.2f}GiB"
+        text = f"{raw:.2f}"
       axis.text(
           bar.get_x() + bar.get_width() / 2,
           bar.get_height() + 0.04,
@@ -632,16 +630,6 @@ def plot_quality(
   axis.set_ylabel("Relative to unpacked baseline")
   axis.set_title("Budget and Sanity Metrics", fontweight="bold")
   axis.legend(frameon=False, loc="upper left", ncols=2)
-  axis.text(
-      0.98,
-      0.93,
-      f"Packed reaches the unpacked target-token budget at step {packed_step}.",
-      transform=axis.transAxes,
-      ha="right",
-      va="top",
-      fontsize=9,
-      color=GRAY,
-  )
 
   fig.suptitle(
       "Gemma3 270M Useful-Token Budget Parity: b16/L512 on v5litepod-1",
