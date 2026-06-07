@@ -8,4 +8,7 @@ checkpoints/
 outputs/
 profiles/
 02-PACKING/results/
+02-PACKING/data/raw_artifacts/*/short-throughput/
+02-PACKING/data/raw_artifacts/*/quality-unpacked/
+02-PACKING/data/raw_artifacts/*/quality-packed/
 *.log

@@ -1,12 +1,13 @@
 # Tunix Accel
 
-This repository currently publishes one retained workstream:
+This repository currently publishes two retained workstreams:
 
 - `01-CCE/`: Cut Cross Entropy for JAX/Tunix decoder-LM training on TPU.
+- `02-PACKING/`: Sequence packing for JAX/Tunix SFT input batches.
 
-The main branch is intentionally scoped to CCE. Earlier exploratory workstreams
-for packing, tiled MLP, activation policy, and large-model patch stacks are
-preserved on:
+The main branch is intentionally scoped to workstreams with a cleaned
+implementation and retained technical report. Earlier exploratory workstreams
+for tiled MLP, activation policy, and large-model patch stacks are preserved on:
 
 ```text
 codex/archive-02-05-workstreams
@@ -78,12 +79,37 @@ For full fine-tuning where the LM head must receive gradients:
 from tunix_accel.tunix_lora_ce import use_trainable_lm_head_ce
 ```
 
+## Packing API
+
+When installed, the package also widens Tunix
+`PeftTrainer.with_gen_model_input_fn` with optional `packing=` support. It is a
+no-op unless `packing=` is supplied.
+
+```python
+from tunix_accel import TunixPackingConfig
+
+trainer = peft_trainer.PeftTrainer(...).with_gen_model_input_fn(
+    gen_model_input_fn,
+    packing=TunixPackingConfig(pad_token_id=0),
+)
+trainer.train(train_ds, eval_ds)
+```
+
+Use `packing=True` for defaults, a mapping for lightweight configuration, or
+omit `packing` to keep ordinary Tunix behavior.
+
 ## Report Package
 
-- Report: `01-CCE/TECHNICAL_REPORT.md`
-- Reproduction guide: `01-CCE/REPRODUCE.md`
-- Retained data: `01-CCE/data/`
-- Figures: `01-CCE/assets/`
+- `01-CCE/`
+  - Report: `01-CCE/TECHNICAL_REPORT.md`
+  - Reproduction guide: `01-CCE/REPRODUCE.md`
+  - Retained data: `01-CCE/data/`
+  - Figures: `01-CCE/assets/`
+- `02-PACKING/`
+  - Report: `02-PACKING/TECHNICAL_REPORT.md`
+  - Reproduction guide: `02-PACKING/REPRODUCE.md`
+  - Retained data: `02-PACKING/data/`
+  - Figures: `02-PACKING/assets/`
 - Implementation notes for future patches: `FUTURE_PATCH_NOTES.md`
 
 The retained artifacts are compact enough to audit the report without keeping
