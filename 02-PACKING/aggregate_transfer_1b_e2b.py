@@ -11,6 +11,7 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import Patch
 
 
 ROOT = Path(__file__).resolve().parent
@@ -330,7 +331,12 @@ def plot_memory_neutrality(pairs: list[dict[str, Any]]) -> Path:
   ]
   x = np.arange(len(pairs))
   delta = [row["xla_gib_delta_per_chip"] for row in pairs]
-  colors = ["#54A24B" if value <= 0.05 else "#F58518" for value in delta]
+  small_delta_color = "#54A24B"
+  larger_delta_color = "#F58518"
+  colors = [
+      small_delta_color if value <= 0.05 else larger_delta_color
+      for value in delta
+  ]
   axis.axhline(0, color="#3A4451", linewidth=1.0, zorder=2)
   axis.bar(x, delta, color=colors, width=0.68, zorder=3)
   max_delta = max(delta) if delta else 0.0
@@ -350,6 +356,15 @@ def plot_memory_neutrality(pairs: list[dict[str, Any]]) -> Path:
       fontsize=14,
       fontweight="bold",
       pad=10,
+  )
+  axis.legend(
+      handles=[
+          Patch(color=small_delta_color, label="Delta <= 0.05 GiB/chip"),
+          Patch(color=larger_delta_color, label="Delta > 0.05 GiB/chip"),
+      ],
+      frameon=False,
+      loc="upper left",
+      ncols=2,
   )
   axis.set_ylabel("Packed - unpacked\nXLA train-step GiB/chip")
   axis.set_xticks(x)
