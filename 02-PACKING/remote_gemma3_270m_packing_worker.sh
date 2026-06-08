@@ -65,6 +65,7 @@ if [[ "${MODEL_ID:-}" == *"gemma-4"* ]]; then
 fi
 
 run_sweep() {
+  local distributed_args=()
   local model_args=(
     --model-id "${MODEL_ID-google/gemma-3-270m-it}"
     --model-source "${MODEL_SOURCE-gcs}"
@@ -76,7 +77,13 @@ run_sweep() {
   if [[ "${ALLOW_DOWNLOAD:-0}" == "1" ]]; then
     model_args+=(--allow-download)
   fi
-  python 02-PACKING/run_gemma3_270m_packing_sweep.py "${model_args[@]}" "$@"
+  if [[ "${INITIALIZE_DISTRIBUTED:-0}" == "1" ]]; then
+    distributed_args+=(--initialize-distributed)
+  fi
+  python 02-PACKING/run_gemma3_270m_packing_sweep.py \
+    "${model_args[@]}" \
+    "${distributed_args[@]}" \
+    "$@"
 }
 
 case "${SUITE}" in

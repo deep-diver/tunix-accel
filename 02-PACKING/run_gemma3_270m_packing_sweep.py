@@ -234,6 +234,8 @@ def command_for_case(
         "--max-generation-steps",
         str(args.max_generation_steps),
     ])
+  if args.initialize_distributed:
+    command.append("--initialize-distributed")
   if args.allow_download:
     command.append("--allow-download")
   return command
@@ -427,6 +429,14 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--mesh-tp", type=int, default=1)
   parser.add_argument("--tpu", default="v5litepod-1")
   parser.add_argument("--chips", type=int, default=1)
+  parser.add_argument(
+      "--initialize-distributed",
+      action="store_true",
+      help=(
+          "Forward distributed JAX initialization to each training subprocess. "
+          "Use when this sweep is launched on every host of a TPU pod slice."
+      ),
+  )
   parser.add_argument("--log-every", type=int, default=1)
   parser.add_argument("--seed", type=int, default=0)
   parser.add_argument("--skip-quality-eval", action="store_true")
