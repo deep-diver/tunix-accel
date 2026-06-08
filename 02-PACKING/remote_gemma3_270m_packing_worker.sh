@@ -64,14 +64,25 @@ if [[ "${MODEL_ID:-}" == *"gemma-4"* ]]; then
   export TUNIX_ACCEL_MODEL_DOWNLOAD_PATH="${TUNIX_ACCEL_MODEL_DOWNLOAD_PATH:-${OUT_BASE}/hf-cache/${MODEL_ID##*/}}"
 fi
 
+normalize_source() {
+  case "$1" in
+    hf) echo "huggingface" ;;
+    *) echo "$1" ;;
+  esac
+}
+
 run_sweep() {
   local distributed_args=()
+  local model_source
+  local tokenizer_source
+  model_source="$(normalize_source "${MODEL_SOURCE-gcs}")"
+  tokenizer_source="$(normalize_source "${TOKENIZER_SOURCE-sentencepiece}")"
   local model_args=(
     --model-id "${MODEL_ID-google/gemma-3-270m-it}"
-    --model-source "${MODEL_SOURCE-gcs}"
+    --model-source "${model_source}"
     --model-path "${MODEL_PATH-gs://gemma-data/checkpoints/gemma3-270m-it}"
     --model-download-path "${MODEL_DOWNLOAD_PATH:-${TUNIX_ACCEL_MODEL_DOWNLOAD_PATH:-}}"
-    --tokenizer-source "${TOKENIZER_SOURCE-sentencepiece}"
+    --tokenizer-source "${tokenizer_source}"
     --tokenizer-path "${TOKENIZER_PATH-gs://gemma-data/tokenizers/tokenizer_gemma3.model}"
   )
   if [[ "${ALLOW_DOWNLOAD:-0}" == "1" ]]; then

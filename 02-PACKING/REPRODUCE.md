@@ -1,7 +1,8 @@
-# Reproducing the Gemma3 270M Packing Rerun
+# Reproducing the 02-PACKING Rerun
 
 This guide reproduces the retained 02-PACKING package: local packing-density
-sweeps and Gemma3 270M Tunix LoRA SFT runs on Cloud TPU `v5litepod-1`.
+sweeps, Gemma3 270M Tunix LoRA SFT runs on Cloud TPU `v5litepod-1`, the
+Gemma3 1B transfer check on `v5litepod-32`, and the Gemma4 E2B boundary smoke.
 
 ## Local Setup
 
@@ -80,9 +81,16 @@ collected:
 python3 02-PACKING/aggregate_dataset_sweep.py
 ```
 
+The 1B transfer figures are regenerated separately after the transfer raw
+artifact is present:
+
+```bash
+python3 02-PACKING/aggregate_transfer_1b_e2b.py
+```
+
 ## TPU Setup
 
-The rerun used:
+The 270M base rerun used:
 
 | Field | Value |
 | --- | --- |
@@ -185,6 +193,141 @@ gcloud compute tpus tpu-vm ssh tunix-pack270-oasst \
 
 In the retained rerun, OPUS100, Alpaca, and OASST1 were collected successfully.
 
+## Gemma3 1B Transfer Run
+
+The retained Gemma3 1B transfer check used a larger TPU because b8/L2048 did
+not fit under the initial FSDP-only attempts:
+
+| Field | Value |
+| --- | --- |
+| TPU type | `v5litepod-32` |
+| Chips | 32 |
+| TPU VM version | `v2-alpha-tpuv5-lite` |
+| Model | `google/gemma-3-1b-it` |
+| Model checkpoint | `gs://gemma-data/checkpoints/gemma3-1b-it` |
+| Tokenizer | `gs://gemma-data/tokenizers/tokenizer_gemma3.model` |
+| Mesh | `fsdp=8,tp=4` |
+| Datasets | OPUS100 EN-FR, Alpaca, OASST1 EN |
+| Shapes | b4/b8 by L512/L1024/L2048 |
+| Steps | 50 LoRA SFT steps per case |
+
+Create the TPU and copy the repository:
+
+```bash
+gcloud compute tpus tpu-vm create tunix-pack1b-32 \
+  --project=gcp-ml-172005 \
+  --zone=us-west4-a \
+  --accelerator-type=v5litepod-32 \
+  --version=v2-alpha-tpuv5-lite
+
+gcloud compute tpus tpu-vm scp --recurse . tunix-pack1b-32:~/TUNIX-TRY \
+  --project=gcp-ml-172005 \
+  --zone=us-west4-a \
+  --worker=all
+```
+
+Run the three dataset sweeps. In practice, SSH to each worker can be launched
+with `setsid -f` or a job scheduler so the 32-chip distributed job stays
+attached to the TPU worker set; the important environment is:
+
+```bash
+for ds in opus100 alpaca oasst1; do
+  gcloud compute tpus tpu-vm ssh tunix-pack1b-32 \
+    --project=gcp-ml-172005 \
+    --zone=us-west4-a \
+    --worker=all \
+    --command "cd ~/TUNIX-TRY && \
+      SKIP_INSTALL=1 \
+      MODEL_ID=google/gemma-3-1b-it \
+      MODEL_SOURCE=gcs \
+      MODEL_PATH=gs://gemma-data/checkpoints/gemma3-1b-it \
+      TOKENIZER_SOURCE=sentencepiece \
+      TOKENIZER_PATH=gs://gemma-data/tokenizers/tokenizer_gemma3.model \
+      TPU_TYPE=v5litepod-32 \
+      CHIPS=32 \
+      MESH_FSDP=8 \
+      MESH_TP=4 \
+      INITIALIZE_DISTRIBUTED=1 \
+      DATASET_MODE=${ds} \
+      LONG_EXAMPLE_POLICY=truncate \
+      BATCH_SIZES=4,8 \
+      CONTEXTS=512,1024,2048 \
+      NUM_EXAMPLES=5000 \
+      MAX_STEPS=50 \
+      OUT_BASE=/tmp/packing-transfer/gemma3-1b-transfer32-tp4/${ds} \
+      bash 02-PACKING/remote_gemma3_270m_packing_worker.sh short-throughput"
+done
+```
+
+Collect the worker-0 artifact:
+
+```bash
+gcloud compute tpus tpu-vm ssh tunix-pack1b-32 \
+  --project=gcp-ml-172005 \
+  --zone=us-west4-a \
+  --worker=0 \
+  --command 'cd /tmp/packing-transfer && tar -czf /tmp/gemma3_1b_transfer32_tp4_results.tar.gz gemma3-1b-transfer32-tp4'
+
+mkdir -p 02-PACKING/data/transfer_1b_e2b/raw
+gcloud compute tpus tpu-vm scp \
+  tunix-pack1b-32:/tmp/gemma3_1b_transfer32_tp4_results.tar.gz \
+  02-PACKING/data/transfer_1b_e2b/raw/ \
+  --project=gcp-ml-172005 \
+  --zone=us-west4-a \
+  --worker=0
+```
+
+Then regenerate locally. The aggregator extracts the tarball if the expanded
+raw directory is absent:
+
+```bash
+python3 02-PACKING/aggregate_transfer_1b_e2b.py
+```
+
+## Gemma4 E2B Boundary Smoke
+
+Gemma4 E2B was tested only to determine whether the same b8/L2048 transfer
+matrix could be run on the same `v5litepod-32` class. It could not under the
+current runner: both `fsdp=8,tp=4` and `fsdp=4,tp=8` hit the same all-gather
+HBM allocation before packing could become the relevant variable.
+
+```bash
+gcloud compute tpus tpu-vm create tunix-pack-e2b-32 \
+  --project=gcp-ml-172005 \
+  --zone=us-west4-a \
+  --accelerator-type=v5litepod-32 \
+  --version=v2-alpha-tpuv5-lite
+
+for mesh in "8 4" "4 8"; do
+  set -- ${mesh}
+  gcloud compute tpus tpu-vm ssh tunix-pack-e2b-32 \
+    --project=gcp-ml-172005 \
+    --zone=us-west4-a \
+    --worker=all \
+    --command "cd ~/TUNIX-TRY && \
+      SKIP_INSTALL=1 \
+      MODEL_ID=google/gemma-4-E2B \
+      MODEL_SOURCE=huggingface \
+      TOKENIZER_SOURCE=huggingface \
+      TPU_TYPE=v5litepod-32 \
+      CHIPS=32 \
+      MESH_FSDP=$1 \
+      MESH_TP=$2 \
+      INITIALIZE_DISTRIBUTED=1 \
+      DATASET_MODE=opus100 \
+      LONG_EXAMPLE_POLICY=truncate \
+      BATCH_SIZES=8 \
+      CONTEXTS=2048 \
+      NUM_EXAMPLES=5000 \
+      MAX_STEPS=50 \
+      OUT_BASE=/tmp/packing-transfer/gemma4-e2b-boundary-fsdp$1-tp$2 \
+      bash 02-PACKING/remote_gemma3_270m_packing_worker.sh short-throughput"
+done
+```
+
+An authenticated Hugging Face token is required for the Gemma4 checkpoint.
+`MODEL_SOURCE=hf` and `TOKENIZER_SOURCE=hf` are accepted aliases by the wrapper.
+
 ## Collect Artifacts
 
 Compress remote outputs:
@@ -243,4 +386,14 @@ for name in tunix-pack270-short tunix-pack270-unpack tunix-pack270-packed; do
     --zone=us-west4-a \
     --quiet
 done
+
+gcloud compute tpus tpu-vm delete tunix-pack1b-32 \
+  --project=gcp-ml-172005 \
+  --zone=us-west4-a \
+  --quiet
+
+gcloud compute tpus tpu-vm delete tunix-pack-e2b-32 \
+  --project=gcp-ml-172005 \
+  --zone=us-west4-a \
+  --quiet
 ```

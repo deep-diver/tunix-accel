@@ -1,8 +1,10 @@
 # Sequence Packing on JAX/Tunix TPU: Turning Padding Into Useful Tokens
 
-This report makes one deliberately narrow claim: for Gemma3 270M LoRA SFT on
+This report makes one deliberately narrow claim: for Gemma LoRA SFT on
 JAX/Tunix, sequence packing turns padding-heavy fixed rows into useful target
-tokens. It is a data-density and useful-token-throughput optimization, not a
+tokens. Gemma3 270M is the exhaustive base case, Gemma3 1B is the same-shape
+transfer check, and Gemma4 E2B is retained only as a fixed-graph fit boundary.
+Packing is a data-density and useful-token-throughput optimization, not a
 fixed-shape memory optimization.
 
 ## Executive Summary
@@ -12,11 +14,12 @@ fixed-shape memory optimization.
 | What is being optimized? | Padding waste. Packing combines multiple short SFT examples into one fixed-length row while preserving per-example positions and block-causal attention. |
 | How much padding waste was available? | On OPUS100 EN-FR with the Gemma tokenizer and batch 16, fixed unpacked density fell from 24.9% at L256 to 3.2% at L2048, while packed density stayed around 98.6-99.8%. |
 | Does this depend on the dataset? | Yes. OPUS100 EN-FR showed the largest gain, Alpaca remained strong, and OASST1 showed a smaller but still clear gain as examples became longer and less padding-heavy. |
-| Does it improve useful-token throughput? | Yes. On the original OPUS matched-shape runs, target-token throughput improved by 21.2x to 40.1x; the b4 dataset ablation reached 78.9x at OPUS L2048. |
+| Does it improve useful-token throughput? | Yes. On the original OPUS matched-shape runs, target-token throughput improved by 21.2x to 40.1x; the b4 dataset ablation reached 78.9x at OPUS L2048. The Gemma3 1B transfer check showed the same pattern: OPUS L2048 improved 72.7x-73.2x, Alpaca L2048 improved 26.5x-28.0x, and OASST1 L2048 improved 9.7x-10.2x. |
 | Does same-shape step time change? | Barely in this setup. Packed/unpacked step-time ratios were 0.982x, 1.006x, and 1.004x for the passing matched shapes. |
 | Does useful-token training finish faster? | Yes for token budget. Packed reached the unpacked run's 1.75M target-token budget at step 528 in 88s of cumulative step time, versus 5,000 unpacked steps in 564s. |
 | Is the optimizer trajectory identical? | No. Packing changes the number of target tokens per optimizer update. Loss should be compared by useful tokens and interpreted with that optimizer-step difference in mind. |
 | What is the memory claim? | There is no memory-saving claim. Planned HBM rows are retained only as a negative control showing that packing does not move the fixed-shape fit frontier. |
+| Does the 270M result transfer? | Yes for Gemma3 1B under the tested 32-chip setup. Gemma4 E2B did not reach the requested b8/L2048 shape on v5litepod-32 because the current runner hit an unsharded all-gather HBM wall. |
 
 ## Experiment Scope
 
@@ -27,17 +30,19 @@ fixed-shape memory optimization.
 | LoRA rank / alpha | rank 16, alpha 32 |
 | Main training dataset | OPUS100 EN-FR |
 | Dataset ablation | OPUS100 EN-FR, Alpaca, OASST1 EN |
+| Transfer check | Gemma3 1B on OPUS100 EN-FR, Alpaca, OASST1 EN |
 | Prompt format | Gemma IT translation wrapper |
 | Loss mask | target-only |
-| TPU | Cloud TPU `v5litepod-1`, 1 chip |
+| TPU | Cloud TPU `v5litepod-1`, 1 chip for the 270M base case; `v5litepod-32`, 32 chips for the 1B transfer check |
 | Zone | `us-west4-a` |
-| Mesh | `fsdp=1,tp=1` |
+| Mesh | `fsdp=1,tp=1` for 270M; `fsdp=8,tp=4` for Gemma3 1B |
 | CE path | Default Tunix CE |
 | Other patches | CCE, Tiled MLP, activation policy, and Splash Attention disabled |
 
 The local density sweeps used 5k and 20k OPUS100 examples. The dataset
-ablation used 5k examples per dataset. The TPU runs used 5k examples. All TPU
-figures and tables below come from `v5litepod-1`, one chip.
+ablation used 5k examples per dataset. The 270M TPU runs used 5k examples on
+`v5litepod-1`, one chip. The 1B transfer check used the same 5k-example dataset
+matrix on `v5litepod-32`, 32 chips, with `fsdp=8,tp=4`.
 
 ## 1. The Dataset Has a Large Packing Opportunity
 
@@ -91,7 +96,52 @@ For absolute measured throughput, the retained TPU rows are:
 
 ![Gemma3 270M dataset TPU absolute throughput](./assets/gemma3_270m_dataset_tpu_absolute_throughput.png)
 
-## 3. The Throughput Gain Is Real When the Shape Fits
+## 3. The 1B Transfer Check Preserves the Story
+
+The 270M result should not be read as a tiny-model curiosity. To check transfer
+without changing the claim, the same short-throughput matrix was run on
+Gemma3 1B with the same three datasets, b4/b8, L512/L1024/L2048, 50 LoRA SFT
+steps per case, and default CE. The TPU was `v5litepod-32` in `us-west4-a`
+with 32 chips and mesh `fsdp=8,tp=4`.
+
+![Gemma3 1B packing transfer](./assets/gemma3_1b_packing_transfer_v5litepod32.png)
+
+The shape of the result is the same as 270M: packed rows are nearly full, while
+unpacked target-token density falls as max length grows. The payoff remains
+dataset-dependent:
+
+| Dataset | b4/L2048 gain | b8/L2048 gain | Why |
+| --- | ---: | ---: | --- |
+| OPUS EN-FR | 73.2x | 72.7x | Very short translation pairs; L2048 is mostly padding unless packed. |
+| Alpaca | 28.0x | 26.5x | Short-to-medium instruction records; still highly padding-heavy at L2048. |
+| OASST1 EN | 10.2x | 9.7x | Longer assistant turns; unpacked rows already carry more useful tokens. |
+
+Memory stays a negative control rather than the headline. Packed and unpacked
+use the same fixed `(batch, length)` shape, and the measured XLA high-water
+deltas were small:
+
+![Gemma3 1B packing memory neutrality](./assets/gemma3_1b_packing_memory_neutrality_v5litepod32.png)
+
+This 1B run also exposed a practical sharding note. On `v5litepod-16` and on
+`v5litepod-32` with FSDP-only style sharding, b8/L2048 did not fit. The retained
+1B matrix therefore uses `fsdp=8,tp=4`. That setup detail affects fit, but it
+does not change the packing interpretation: once the fixed shape fits, packing
+fills that shape with useful tokens instead of padding.
+
+Gemma4 E2B was tried as the next transfer point, but the requested b8/L2048
+shape did not fit on `v5litepod-32`. Both `fsdp=8,tp=4` and `fsdp=4,tp=8`
+hit the same all-gather allocation:
+
+| Model | TPU | Mesh | Shape | Result |
+| --- | --- | --- | --- | --- |
+| Gemma4 E2B | `v5litepod-32`, 32 chips | `fsdp=8,tp=4` | b8/L2048 | OOM: 37.58GB all-gather allocation over 17.18GB/chip HBM |
+| Gemma4 E2B | `v5litepod-32`, 32 chips | `fsdp=4,tp=8` | b8/L2048 | Same all-gather OOM; current runner did not shard that buffer further |
+
+This is not a packing failure. It is a fixed-shape model execution boundary.
+Packing cannot help if the model graph cannot compile or run the unpacked shape
+in the first place.
+
+## 4. The Throughput Gain Is Real When the Shape Fits
 
 For the passing matched shapes, step time stayed in the same band while
 target-token throughput increased sharply.
@@ -109,7 +159,7 @@ target-token density is especially low at that shape. The model is doing about
 the same fixed-shape work either way; packed batches simply waste far fewer
 positions.
 
-## 4. Useful-Token Budget View
+## 5. Useful-Token Budget View
 
 The quality sanity run used b16/L512 for both variants:
 
@@ -141,7 +191,7 @@ The eval losses are retained only as a sanity check that both jobs completed
 normal Tunix training and evaluation. They are not presented as a translation
 quality benchmark.
 
-## 5. Non-Claim Check: Same Shape, Same Planned HBM
+## 6. Non-Claim Check: Same Shape, Same Planned HBM
 
 The short TPU matrix also records planned HBM, but only as a guardrail. Packing
 changes token layout and masks inside a fixed row; it does not change
@@ -166,7 +216,7 @@ because CE logits or attention activations exceed HBM, packing alone will not
 make that shape fit. That job belongs to memory-path optimizations such as CCE
 or activation-memory work.
 
-## 6. Implementation Notes
+## 7. Implementation Notes
 
 The implementation has two layers:
 
@@ -196,7 +246,7 @@ Because packing does not touch the loss function, it composes with CCE. The 270M
 rerun deliberately disabled CCE so that the sequence-packing claim stayed
 isolated.
 
-## 7. Interpretation
+## 8. Interpretation
 
 The clean message is:
 
@@ -213,7 +263,7 @@ In other words, packing is the right lever for padding waste. It is not the
 right lever for dense loss logits, attention activation memory, or model-state
 sharding.
 
-## 8. Retained Artifacts
+## 9. Retained Artifacts
 
 Processed tables:
 
@@ -224,6 +274,9 @@ Processed tables:
 - `data/processed/gemma3_270m_dataset_profile.csv`
 - `data/processed/gemma3_270m_dataset_tpu_sweep_v5litepod1.csv`
 - `data/processed/gemma3_270m_dataset_ablation_summary.json`
+- `data/processed/gemma3_1b_packing_transfer_v5litepod32.csv`
+- `data/processed/gemma3_1b_packing_transfer_pairs_v5litepod32.csv`
+- `data/processed/gemma4_e2b_packing_boundary_v5litepod32.csv`
 
 Local density tables:
 
@@ -240,3 +293,4 @@ Compressed raw TPU artifacts:
 - `data/raw_artifacts/gemma3_270m_dataset_sweep_opus100_v5litepod1/*.tgz`
 - `data/raw_artifacts/gemma3_270m_dataset_sweep_alpaca_v5litepod1/*.tgz`
 - `data/raw_artifacts/gemma3_270m_dataset_sweep_oasst1_v5litepod1/*.tgz`
+- `data/transfer_1b_e2b/raw/gemma3_1b_transfer32_tp4_results.tar.gz`

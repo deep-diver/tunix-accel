@@ -3,7 +3,8 @@
 This repository currently publishes two retained workstreams:
 
 - `01-CCE/`: Cut Cross Entropy for JAX/Tunix decoder-LM training on TPU.
-- `02-PACKING/`: Sequence packing for JAX/Tunix SFT input batches.
+- `02-PACKING/`: Sequence packing for JAX/Tunix SFT input batches, with
+  Gemma3 270M base experiments and Gemma3 1B transfer checks.
 
 The main branch is intentionally scoped to workstreams with a cleaned
 implementation and retained technical report. Earlier exploratory workstreams
