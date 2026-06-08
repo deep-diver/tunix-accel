@@ -4,43 +4,47 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tunix Accel Technical Reports</title>
-  <meta name="description" content="Technical reports for Tunix acceleration experiments.">
+  <meta name="description" content="Technical reports for retained Tunix acceleration experiments: Cut Cross Entropy and Sequence Packing.">
   <link rel="canonical" href="https://deep-diver.github.io/tunix-accel/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Tunix Accel Reports">
   <meta property="og:title" content="Tunix Accel Technical Reports">
-  <meta property="og:description" content="Technical reports for retained Tunix acceleration experiments, currently publishing the 01-CCE workstream.">
+  <meta property="og:description" content="Technical reports for retained Tunix acceleration experiments: Cut Cross Entropy and Sequence Packing.">
   <meta property="og:url" content="https://deep-diver.github.io/tunix-accel/">
   <meta property="og:image" content="https://deep-diver.github.io/tunix-accel/assets/social-card.png">
   <meta property="og:image:secure_url" content="https://deep-diver.github.io/tunix-accel/assets/social-card.png">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Tunix Accel Reports 01-CCE: Cut Cross Entropy on JAX/Tunix TPU">
+  <meta property="og:image:alt" content="Tunix Accel Reports: 01 CCE and 02 Packing">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Tunix Accel Technical Reports">
-  <meta name="twitter:description" content="Technical reports for retained Tunix acceleration experiments, currently publishing the 01-CCE workstream.">
+  <meta name="twitter:description" content="Technical reports for retained Tunix acceleration experiments: Cut Cross Entropy and Sequence Packing.">
   <meta name="twitter:image" content="https://deep-diver.github.io/tunix-accel/assets/social-card.png">
-  <meta name="twitter:image:alt" content="Tunix Accel Reports 01-CCE: Cut Cross Entropy on JAX/Tunix TPU">
+  <meta name="twitter:image:alt" content="Tunix Accel Reports: 01 CCE and 02 Packing">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 <header class="site-header">
   <div class="header-inner">
     <a class="brand" href="./index.html">Tunix Accel Reports</a>
-    <nav class="nav"><a href="./01-cce.html">01-CCE</a><a href="https://github.com/deep-diver/tunix-accel">GitHub</a></nav>
+    <nav class="nav"><a href="./01-cce.html">01-CCE</a><a href="./02-packing.html">02-PACKING</a><a href="https://github.com/deep-diver/tunix-accel">GitHub</a></nav>
   </div>
 </header>
 
 <section class="hero">
   <div class="eyebrow">Tunix Accel</div>
   <h1>Technical Reports</h1>
-  <p class="subtitle">A compact publication surface for retained Tunix acceleration experiments. The main branch currently publishes the CCE workstream only.</p>
+  <p class="subtitle">A compact publication surface for retained JAX/Tunix TPU acceleration experiments.</p>
 </section>
 <main class="index-grid">
   <a class="report-link" href="./01-cce.html">
     <h2>01-CCE</h2>
     <p>Cut Cross Entropy for JAX/Tunix decoder-LM training on Cloud TPU, with Gemma LoRA SFT memory-frontier and parity evidence.</p>
+  </a>
+  <a class="report-link" href="./02-packing.html">
+    <h2>02-PACKING</h2>
+    <p>Sequence packing for JAX/Tunix SFT input batches, showing useful-token throughput gains from padding-heavy datasets.</p>
   </a>
 </main>
 <footer class="footer"><div class="footer-inner">Source repository: <a href="https://github.com/deep-diver/tunix-accel">deep-diver/tunix-accel</a>.</div></footer>

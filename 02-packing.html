@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>02-PACKING Technical Report - Tunix Accel</title>
+  <meta name="description" content="Sequence packing for JAX/Tunix SFT: padding waste, useful-token throughput, Gemma3 270M base evidence, and Gemma3 1B transfer checks.">
+  <link rel="canonical" href="https://deep-diver.github.io/tunix-accel/02-packing.html">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Tunix Accel Reports">
+  <meta property="og:title" content="Sequence Packing on JAX/Tunix TPU">
+  <meta property="og:description" content="Sequence packing for JAX/Tunix SFT: padding waste, useful-token throughput, Gemma3 270M base evidence, and Gemma3 1B transfer checks.">
+  <meta property="og:url" content="https://deep-diver.github.io/tunix-accel/02-packing.html">
+  <meta property="og:image" content="https://deep-diver.github.io/tunix-accel/assets/social-card-packing.png">
+  <meta property="og:image:secure_url" content="https://deep-diver.github.io/tunix-accel/assets/social-card-packing.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Tunix Accel Reports 02-PACKING: Sequence Packing on JAX/Tunix TPU">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Sequence Packing on JAX/Tunix TPU">
+  <meta name="twitter:description" content="Sequence packing for JAX/Tunix SFT: padding waste, useful-token throughput, Gemma3 270M base evidence, and Gemma3 1B transfer checks.">
+  <meta name="twitter:image" content="https://deep-diver.github.io/tunix-accel/assets/social-card-packing.png">
+  <meta name="twitter:image:alt" content="Tunix Accel Reports 02-PACKING: Sequence Packing on JAX/Tunix TPU">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="./index.html">Tunix Accel Reports</a>
+    <nav class="nav"><a href="./01-cce.html">01-CCE</a><a href="./02-packing.html">02-PACKING</a><a href="https://github.com/deep-diver/tunix-accel">GitHub</a></nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="eyebrow">Technical Report</div>
+  <h1>Sequence Packing on JAX/Tunix TPU</h1>
+  <p class="subtitle">Turning padding-heavy SFT batches into useful-token throughput, with Gemma3 270M base evidence and Gemma3 1B transfer checks.</p>
+</section>
+<div class="toc-dock">
+  <details class="floating-toc">
+    <summary>Contents</summary>
+    <nav class="toc-panel" aria-label="Contents">
+      <div class="toc-title">Contents</div>
+      <div class="toc-list">
+<ul>
+<li><a href="#executive-summary">Executive Summary</a></li>
+<li><a href="#experiment-scope">Experiment Scope</a></li>
+<li><a href="#1-the-dataset-has-a-large-packing-opportunity">1. The Dataset Has a Large Packing Opportunity</a></li>
+<li><a href="#2-dataset-shape-decides-the-gain">2. Dataset Shape Decides the Gain</a></li>
+<li><a href="#3-the-1b-transfer-check-preserves-the-story">3. The 1B Transfer Check Preserves the Story</a></li>
+<li><a href="#4-the-throughput-gain-is-real-when-the-shape-fits">4. The Throughput Gain Is Real When the Shape Fits</a></li>
+<li><a href="#5-useful-token-budget-view">5. Useful-Token Budget View</a></li>
+<li><a href="#6-non-claim-check-same-shape-same-planned-hbm">6. Non-Claim Check: Same Shape, Same Planned HBM</a></li>
+<li><a href="#7-implementation-notes">7. Implementation Notes</a></li>
+<li><a href="#8-interpretation">8. Interpretation</a></li>
+<li><a href="#9-retained-artifacts">9. Retained Artifacts</a></li>
+</ul>
+</div>
+    </nav>
+  </details>
+</div>
+<main class="layout">
+  <article class="article">
+<h1 id="sequence-packing-on-jaxtunix-tpu-turning-padding-into-useful-tokens">Sequence Packing on JAX/Tunix TPU: Turning Padding Into Useful Tokens</h1>
+<p>This report makes one deliberately narrow claim: for Gemma LoRA SFT on
+JAX/Tunix, sequence packing turns padding-heavy fixed rows into useful target
+tokens. Gemma3 270M is the exhaustive base case, Gemma3 1B is the same-shape
+transfer check. Packing is a data-density and useful-token-throughput
+optimization, not a fixed-shape memory optimization.</p>
+<h2 id="executive-summary">Executive Summary</h2>
+<table>
+<thead>
+<tr>
+<th>Question</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What is being optimized?</td>
+<td>Padding waste. Packing combines multiple short SFT examples into one fixed-length row while preserving per-example positions and block-causal attention.</td>
+</tr>
+<tr>
+<td>How much padding waste was available?</td>
+<td>On OPUS100 EN-FR with the Gemma tokenizer and batch 16, fixed unpacked density fell from 24.9% at L256 to 3.2% at L2048, while packed density stayed around 98.6-99.8%.</td>
+</tr>
+<tr>
+<td>Does this depend on the dataset?</td>
+<td>Yes. OPUS100 EN-FR showed the largest gain, Alpaca remained strong, and OASST1 showed a smaller but still clear gain as examples became longer and less padding-heavy.</td>
+</tr>
+<tr>
+<td>Does it improve useful-token throughput?</td>
+<td>Yes. On the original OPUS matched-shape runs, target-token throughput improved by 21.2x to 40.1x; the b4 dataset ablation reached 78.9x at OPUS L2048. The Gemma3 1B transfer check showed the same pattern: OPUS L2048 improved 72.7x-73.2x, Alpaca L2048 improved 26.5x-28.0x, and OASST1 L2048 improved 9.7x-10.2x.</td>
+</tr>
+<tr>
+<td>Does same-shape step time change?</td>
+<td>Barely in this setup. Packed/unpacked step-time ratios were 0.982x, 1.006x, and 1.004x for the passing matched shapes.</td>
+</tr>
+<tr>
+<td>Does useful-token training finish faster?</td>
+<td>Yes for token budget. Packed reached the unpacked run's 1.75M target-token budget at step 528 in 88s of cumulative step time, versus 5,000 unpacked steps in 564s.</td>
+</tr>
+<tr>
+<td>Is the optimizer trajectory identical?</td>
+<td>No. Packing changes the number of target tokens per optimizer update. Loss should be compared by useful tokens and interpreted with that optimizer-step difference in mind.</td>
+</tr>
+<tr>
+<td>What is the memory claim?</td>
+<td>There is no memory-saving claim. Planned HBM rows are retained only as a negative control showing that packing does not move the fixed-shape fit frontier.</td>
+</tr>
+<tr>
+<td>Does the 270M result transfer?</td>
+<td>Yes for Gemma3 1B under the tested 32-chip setup. The dataset ordering and long-context gains remain the same.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="experiment-scope">Experiment Scope</h2>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Model</td>
+<td><code>google/gemma-3-270m-it</code></td>
+</tr>
+<tr>
+<td>Training mode</td>
+<td>Tunix PEFT/LoRA</td>
+</tr>
+<tr>
+<td>LoRA rank / alpha</td>
+<td>rank 16, alpha 32</td>
+</tr>
+<tr>
+<td>Main training dataset</td>
+<td>OPUS100 EN-FR</td>
+</tr>
+<tr>
+<td>Dataset ablation</td>
+<td>OPUS100 EN-FR, Alpaca, OASST1 EN</td>
+</tr>
+<tr>
+<td>Transfer check</td>
+<td>Gemma3 1B on OPUS100 EN-FR, Alpaca, OASST1 EN</td>
+</tr>
+<tr>
+<td>Prompt format</td>
+<td>Gemma IT translation wrapper</td>
+</tr>
+<tr>
+<td>Loss mask</td>
+<td>target-only</td>
+</tr>
+<tr>
+<td>TPU</td>
+<td>Cloud TPU <code>v5litepod-1</code>, 1 chip for the 270M base case; <code>v5litepod-32</code>, 32 chips for the 1B transfer check</td>
+</tr>
+<tr>
+<td>Zone</td>
+<td><code>us-west4-a</code></td>
+</tr>
+<tr>
+<td>Mesh</td>
+<td><code>fsdp=1,tp=1</code> for 270M; <code>fsdp=8,tp=4</code> for Gemma3 1B</td>
+</tr>
+<tr>
+<td>CE path</td>
+<td>Default Tunix CE</td>
+</tr>
+<tr>
+<td>Other patches</td>
+<td>CCE, Tiled MLP, activation policy, and Splash Attention disabled</td>
+</tr>
+</tbody>
+</table>
+<p>The local density sweeps used 5k and 20k OPUS100 examples. The dataset
+ablation used 5k examples per dataset. The 270M TPU runs used 5k examples on
+<code>v5litepod-1</code>, one chip. The 1B transfer check used the same 5k-example dataset
+matrix on <code>v5litepod-32</code>, 32 chips, with <code>fsdp=8,tp=4</code>.</p>
+<h2 id="1-the-dataset-has-a-large-packing-opportunity">1. The Dataset Has a Large Packing Opportunity</h2>
+<p>Before loading the model, the Gemma tokenizer already shows why packing is
+worth testing. With 20k OPUS100 EN-FR examples and batch 16, fixed unpacked
+density falls as max length grows: 24.9% at L256, 12.6% at L512, 6.3% at
+L1024, and 3.2% at L2048. Packed density stays around 98.6-99.8%.</p>
+<p><img alt="Gemma3 270M density opportunity" src="./assets/gemma3_270m_density_opportunity.png" /></p>
+<p>The most important number here is not memory. It is row reduction. At L512,
+20k examples collapse to 2,535 packed rows, a 7.9x row reduction. At L2048,
+they collapse to 632 rows, a 31.6x row reduction. That does not make the model
+shape smaller during a given step; it makes each fixed row carry far more real
+training content.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">Max length</th>
+<th style="text-align: right;">Fixed density</th>
+<th style="text-align: right;">Dynamic estimate</th>
+<th style="text-align: right;">Packed density</th>
+<th style="text-align: right;">Row reduction</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">256</td>
+<td style="text-align: right;">24.9%</td>
+<td style="text-align: right;">39.2%</td>
+<td style="text-align: right;">98.6%</td>
+<td style="text-align: right;">4.0x</td>
+</tr>
+<tr>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">12.6%</td>
+<td style="text-align: right;">37.4%</td>
+<td style="text-align: right;">99.2%</td>
+<td style="text-align: right;">7.9x</td>
+</tr>
+<tr>
+<td style="text-align: right;">1024</td>
+<td style="text-align: right;">6.3%</td>
+<td style="text-align: right;">37.1%</td>
+<td style="text-align: right;">99.6%</td>
+<td style="text-align: right;">15.8x</td>
+</tr>
+<tr>
+<td style="text-align: right;">2048</td>
+<td style="text-align: right;">3.2%</td>
+<td style="text-align: right;">36.9%</td>
+<td style="text-align: right;">99.8%</td>
+<td style="text-align: right;">31.6x</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-dataset-shape-decides-the-gain">2. Dataset Shape Decides the Gain</h2>
+<p>Packing is model-agnostic at the mechanism level, but the payoff is not
+dataset-agnostic. It depends on how many supervised target tokens survive inside
+each fixed row. To test that directly, the 270M rerun added a max-length sweep
+over three SFT-like datasets: OPUS100 EN-FR, Alpaca, and OASST1 English
+assistant turns.</p>
+<p><img alt="Gemma3 270M dataset ablation" src="./assets/gemma3_270m_dataset_ablation.png" /></p>
+<p>The left panel is tokenizer-only. It asks how much target-token density packing
+could recover before any model is loaded. The right panel is the corresponding
+measured TPU gain for the collected short runs, using the same Gemma3 270M
+LoRA setup on one <code>v5litepod-1</code> chip with batch 4 and 50 measured steps.</p>
+<table>
+<thead>
+<tr>
+<th>Dataset</th>
+<th style="text-align: right;">L512 profile gain</th>
+<th style="text-align: right;">L2048 profile gain</th>
+<th style="text-align: right;">L512 TPU gain</th>
+<th style="text-align: right;">L2048 TPU gain</th>
+<th>Interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OPUS EN-FR</td>
+<td style="text-align: right;">9.2x</td>
+<td style="text-align: right;">34.8x</td>
+<td style="text-align: right;">23.1x</td>
+<td style="text-align: right;">78.9x</td>
+<td>Very short examples; longer context mostly creates padding unless packed.</td>
+</tr>
+<tr>
+<td>Alpaca</td>
+<td style="text-align: right;">6.0x</td>
+<td style="text-align: right;">24.1x</td>
+<td style="text-align: right;">8.5x</td>
+<td style="text-align: right;">26.5x</td>
+<td>Short-to-medium instruction records; strong and stable packing case.</td>
+</tr>
+<tr>
+<td>OASST1 EN</td>
+<td style="text-align: right;">2.3x</td>
+<td style="text-align: right;">8.5x</td>
+<td style="text-align: right;">2.6x</td>
+<td style="text-align: right;">10.3x</td>
+<td>Longer conversational turns; still useful, but less dramatic.</td>
+</tr>
+</tbody>
+</table>
+<p>This is the cleanest way to read packing: max length amplifies the win only
+when examples are short relative to the row. OPUS and Alpaca therefore improve
+as context length grows. OASST improves more slowly because its examples are
+longer and already fill more of each fixed row.</p>
+<p>For absolute measured throughput, the retained TPU rows are:</p>
+<p><img alt="Gemma3 270M dataset TPU absolute throughput" src="./assets/gemma3_270m_dataset_tpu_absolute_throughput.png" /></p>
+<h2 id="3-the-1b-transfer-check-preserves-the-story">3. The 1B Transfer Check Preserves the Story</h2>
+<p>The 270M result should not be read as a tiny-model curiosity. To check transfer
+without changing the claim, the same short-throughput matrix was run on
+Gemma3 1B with the same three datasets, b4/b8, L512/L1024/L2048, 50 LoRA SFT
+steps per case, and default CE. The TPU was <code>v5litepod-32</code> in <code>us-west4-a</code>
+with 32 chips and mesh <code>fsdp=8,tp=4</code>.</p>
+<p><img alt="Gemma3 1B packing transfer" src="./assets/gemma3_1b_packing_transfer_v5litepod32.png" /></p>
+<p>The shape of the result is the same as 270M: packed rows are nearly full, while
+unpacked target-token density falls as max length grows. The payoff remains
+dataset-dependent:</p>
+<table>
+<thead>
+<tr>
+<th>Dataset</th>
+<th style="text-align: right;">b4/L2048 gain</th>
+<th style="text-align: right;">b8/L2048 gain</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OPUS EN-FR</td>
+<td style="text-align: right;">73.2x</td>
+<td style="text-align: right;">72.7x</td>
+<td>Very short translation pairs; L2048 is mostly padding unless packed.</td>
+</tr>
+<tr>
+<td>Alpaca</td>
+<td style="text-align: right;">28.0x</td>
+<td style="text-align: right;">26.5x</td>
+<td>Short-to-medium instruction records; still highly padding-heavy at L2048.</td>
+</tr>
+<tr>
+<td>OASST1 EN</td>
+<td style="text-align: right;">10.2x</td>
+<td style="text-align: right;">9.7x</td>
+<td>Longer assistant turns; unpacked rows already carry more useful tokens.</td>
+</tr>
+</tbody>
+</table>
+<p>Memory stays a negative control rather than the headline. Packed and unpacked
+use the same fixed <code>(batch, length)</code> shape, and the measured XLA high-water
+deltas were small:</p>
+<p><img alt="Gemma3 1B packing memory neutrality" src="./assets/gemma3_1b_packing_memory_neutrality_v5litepod32.png" /></p>
+<p>This 1B run also exposed a practical sharding note. On <code>v5litepod-16</code> and on
+<code>v5litepod-32</code> with FSDP-only style sharding, b8/L2048 did not fit. The retained
+1B matrix therefore uses <code>fsdp=8,tp=4</code>. That setup detail affects fit, but it
+does not change the packing interpretation: once the fixed shape fits, packing
+fills that shape with useful tokens instead of padding.</p>
+<h2 id="4-the-throughput-gain-is-real-when-the-shape-fits">4. The Throughput Gain Is Real When the Shape Fits</h2>
+<p>For the passing matched shapes, step time stayed in the same band while
+target-token throughput increased sharply.</p>
+<p><img alt="Gemma3 270M TPU throughput ratios" src="./assets/gemma3_270m_tpu_throughput_ratios.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Shape</th>
+<th style="text-align: right;">Unpacked target tok/s</th>
+<th style="text-align: right;">Packed target tok/s</th>
+<th style="text-align: right;">Throughput gain</th>
+<th style="text-align: right;">Step-time ratio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>b8/L512</td>
+<td style="text-align: right;">1.59k/s</td>
+<td style="text-align: right;">34.01k/s</td>
+<td style="text-align: right;">21.4x</td>
+<td style="text-align: right;">0.982x</td>
+</tr>
+<tr>
+<td>b8/L1024</td>
+<td style="text-align: right;">0.74k/s</td>
+<td style="text-align: right;">29.83k/s</td>
+<td style="text-align: right;">40.1x</td>
+<td style="text-align: right;">1.006x</td>
+</tr>
+<tr>
+<td>b16/L512</td>
+<td style="text-align: right;">1.54k/s</td>
+<td style="text-align: right;">32.62k/s</td>
+<td style="text-align: right;">21.2x</td>
+<td style="text-align: right;">1.004x</td>
+</tr>
+</tbody>
+</table>
+<p>The b8/L1024 row gets the largest throughput gain because fixed unpacked
+target-token density is especially low at that shape. The model is doing about
+the same fixed-shape work either way; packed batches simply waste far fewer
+positions.</p>
+<h2 id="5-useful-token-budget-view">5. Useful-Token Budget View</h2>
+<p>The quality sanity run used b16/L512 for both variants:</p>
+<table>
+<thead>
+<tr>
+<th>Variant</th>
+<th style="text-align: right;">Steps</th>
+<th style="text-align: right;">Final target tokens</th>
+<th style="text-align: right;">Cumulative step time</th>
+<th style="text-align: right;">Wall time</th>
+<th style="text-align: right;">Eval loss</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>unpacked</td>
+<td style="text-align: right;">5,000</td>
+<td style="text-align: right;">1.75M</td>
+<td style="text-align: right;">564s</td>
+<td style="text-align: right;">604s</td>
+<td style="text-align: right;">4.204</td>
+</tr>
+<tr>
+<td>packed</td>
+<td style="text-align: right;">1,000</td>
+<td style="text-align: right;">3.33M</td>
+<td style="text-align: right;">138s</td>
+<td style="text-align: right;">177s</td>
+<td style="text-align: right;">4.330</td>
+</tr>
+</tbody>
+</table>
+<p>Packed reached the unpacked run's final 1.75M target-token budget at step 528,
+after 88s of cumulative step time. The unpacked run needed 5,000 steps and 564s
+of cumulative step time to reach the same budget. That is a 6.4x time-to-budget
+gain in this run.</p>
+<p><img alt="Gemma3 270M quality token budget" src="./assets/gemma3_270m_quality_token_budget.png" /></p>
+<p>The loss figure deliberately has two views. The useful-token view asks what the
+model achieved after seeing a given number of supervised target tokens. The time
+view asks how quickly each input pipeline moved through training. Packing looks
+strongest in the time view because it reaches the same 1.75M target-token budget
+far earlier.</p>
+<p>The useful-token view is the tradeoff. Packing delivers many more target tokens
+per optimizer update, so the packed and unpacked loss curves should not be read
+as identical optimizer trajectories. If an experiment needs the same number of
+optimizer updates, the packed run should be scheduled differently. If it needs
+the same useful-token budget, packing can reach that budget much faster.</p>
+<p>The eval losses are retained only as a sanity check that both jobs completed
+normal Tunix training and evaluation. They are not presented as a translation
+quality benchmark.</p>
+<h2 id="6-non-claim-check-same-shape-same-planned-hbm">6. Non-Claim Check: Same Shape, Same Planned HBM</h2>
+<p>The short TPU matrix also records planned HBM, but only as a guardrail. Packing
+changes token layout and masks inside a fixed row; it does not change
+<code>(batch, length)</code>. Therefore the planned HBM footprint should remain the same.</p>
+<p><img alt="Gemma3 270M TPU fit frontier" src="./assets/gemma3_270m_tpu_fit_frontier.png" /></p>
+<p>That is what happened. Passing and failing shapes had nearly identical planned
+HBM for packed and unpacked variants.</p>
+<table>
+<thead>
+<tr>
+<th>Shape</th>
+<th style="text-align: right;">Unpacked status / XLA HBM</th>
+<th style="text-align: right;">Packed status / XLA HBM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>b8/L512</td>
+<td style="text-align: right;">OK / 6.85 GiB/chip</td>
+<td style="text-align: right;">OK / 6.85 GiB/chip</td>
+</tr>
+<tr>
+<td>b8/L1024</td>
+<td style="text-align: right;">OK / 13.10 GiB/chip</td>
+<td style="text-align: right;">OK / 13.11 GiB/chip</td>
+</tr>
+<tr>
+<td>b16/L512</td>
+<td style="text-align: right;">OK / 12.57 GiB/chip</td>
+<td style="text-align: right;">OK / 12.57 GiB/chip</td>
+</tr>
+<tr>
+<td>b16/L1024</td>
+<td style="text-align: right;">OOM / 21.36 GiB/chip</td>
+<td style="text-align: right;">OOM / 21.39 GiB/chip</td>
+</tr>
+<tr>
+<td>b32/L512</td>
+<td style="text-align: right;">OOM / 21.32 GiB/chip</td>
+<td style="text-align: right;">OOM / 21.35 GiB/chip</td>
+</tr>
+<tr>
+<td>b32/L1024</td>
+<td style="text-align: right;">OOM / 45.45 GiB/chip</td>
+<td style="text-align: right;">OOM / 45.51 GiB/chip</td>
+</tr>
+</tbody>
+</table>
+<p>This section exists to bound the claim. If the desired shape cannot compile
+because CE logits or attention activations exceed HBM, packing alone will not
+make that shape fit. That job belongs to memory-path optimizations such as CCE
+or activation-memory work.</p>
+<h2 id="7-implementation-notes">7. Implementation Notes</h2>
+<p>The implementation has two layers:</p>
+<ol>
+<li><code>tunix_accel.packing</code> packs tokenized examples into fixed-length rows. It
+   emits <code>input_ids</code>, loss masks, valid masks, per-segment positions,
+   <code>segment_ids</code>, and a block-causal attention mask.</li>
+<li><code>tunix_accel.tunix_packing</code> adapts ordinary Tunix batches and widens
+   <code>PeftTrainer.with_gen_model_input_fn</code> with optional <code>packing=</code> support.</li>
+</ol>
+<p>The patched API is inert unless the caller passes <code>packing=</code>:</p>
+<pre><code class="language-python">from tunix_accel import TunixPackingConfig
+
+trainer = peft_trainer.PeftTrainer(...).with_gen_model_input_fn(
+    gen_model_input_fn,
+    packing=TunixPackingConfig(pad_token_id=0),
+)
+</code></pre>
+<p>The packed input function preserves Tunix's <code>input_mask</code> as the loss mask and
+uses <code>valid_mask</code> plus block-causal <code>attention_mask</code> for model inputs. This is
+the correctness-critical part: without segment-aware attention and reset
+positions, packed rows can leak information across examples.</p>
+<p>Because packing does not touch the loss function, it composes with CCE. The 270M
+rerun deliberately disabled CCE so that the sequence-packing claim stayed
+isolated.</p>
+<h2 id="8-interpretation">8. Interpretation</h2>
+<p>The clean message is:</p>
+<ul>
+<li>Use packing when SFT examples are short relative to the chosen max length.</li>
+<li>Preflight the dataset first; model size is secondary to sequence length and
+  target-mask density for this optimization.</li>
+<li>Expect useful-token throughput to rise roughly with target-token density.</li>
+<li>Treat optimizer-step parity and useful-token parity as different experiment
+  designs.</li>
+<li>Do not use packing as a memory-wall fix; the planned-HBM rows are included
+  only to prove that boundary.</li>
+</ul>
+<p>In other words, packing is the right lever for padding waste. It is not the
+right lever for dense loss logits, attention activation memory, or model-state
+sharding.</p>
+<h2 id="9-retained-artifacts">9. Retained Artifacts</h2>
+<p>Processed tables:</p>
+<ul>
+<li><code>data/processed/gemma3_270m_summary.json</code></li>
+<li><code>data/processed/gemma3_270m_short_throughput_v5litepod1.csv</code></li>
+<li><code>data/processed/gemma3_270m_quality_v5litepod1.csv</code></li>
+<li><code>data/processed/gemma3_270m_quality_history_v5litepod1.csv</code></li>
+<li><code>data/processed/gemma3_270m_dataset_profile.csv</code></li>
+<li><code>data/processed/gemma3_270m_dataset_tpu_sweep_v5litepod1.csv</code></li>
+<li><code>data/processed/gemma3_270m_dataset_ablation_summary.json</code></li>
+<li><code>data/processed/gemma3_1b_packing_transfer_v5litepod32.csv</code></li>
+<li><code>data/processed/gemma3_1b_packing_transfer_pairs_v5litepod32.csv</code></li>
+</ul>
+<p>Local density tables:</p>
+<ul>
+<li><code>data/local_density/no_model_5k_packing_efficiency.csv</code></li>
+<li><code>data/local_density/no_model_20k_packing_efficiency.csv</code></li>
+<li><code>data/local_density/gemma_tokenizer_5k_packing.csv</code></li>
+<li><code>data/local_density/gemma_tokenizer_20k_packing.csv</code></li>
+</ul>
+<p>Compressed raw TPU artifacts:</p>
+<ul>
+<li><code>data/raw_artifacts/gemma3_270m_short_throughput_v5litepod1/*.tgz</code></li>
+<li><code>data/raw_artifacts/gemma3_270m_quality_unpacked_v5litepod1/*.tgz</code></li>
+<li><code>data/raw_artifacts/gemma3_270m_quality_packed_v5litepod1/*.tgz</code></li>
+<li><code>data/raw_artifacts/gemma3_270m_dataset_sweep_opus100_v5litepod1/*.tgz</code></li>
+<li><code>data/raw_artifacts/gemma3_270m_dataset_sweep_alpaca_v5litepod1/*.tgz</code></li>
+<li><code>data/raw_artifacts/gemma3_270m_dataset_sweep_oasst1_v5litepod1/*.tgz</code></li>
+<li><code>data/transfer_1b/raw/gemma3_1b_transfer32_tp4_results.tar.gz</code></li>
+</ul>
+  </article>
+</main>
+<footer class="footer"><div class="footer-inner">Source repository: <a href="https://github.com/deep-diver/tunix-accel">deep-diver/tunix-accel</a>.</div></footer>
+</body>
+</html>
