@@ -1,12 +1,12 @@
 # Cut Cross Entropy on JAX/Tunix TPU: Loss-Logits Memory Wall and Transfer Evidence
 
-This report makes one narrow, reproducible claim: on Gemma LoRA SFT with
-JAX/Tunix on Cloud TPU v5e, Cut Cross Entropy removes a real loss-logits memory
-wall without materially changing the training result. Gemma3 270M is the
-exhaustive base case. Gemma3 1B and Gemma4 E2B are transfer checks under the
-same four-chip FSDP setup. Gemma3 4B and Gemma4 E4B are focused larger-model
-checks under an eight-chip FSDP setup, followed by a 12B/27B boundary check
-that deliberately probes where CCE stops being the dominant lever.
+This report makes one narrow, reproducible claim: on LoRA SFT with JAX/Tunix on
+Cloud TPU v5e, Cut Cross Entropy removes a real loss-logits memory wall when
+that wall is active. Gemma3 270M is the exhaustive base case. Gemma3 1B and
+Gemma4 E2B are transfer checks under the same four-chip FSDP setup. Gemma3 4B
+and Gemma4 E4B are focused larger-model checks under an eight-chip FSDP setup,
+followed by a 12B/27B boundary check that deliberately probes where CCE stops
+being the dominant lever. Qwen3 0.6B is a focused non-Gemma transfer check.
 
 ## Executive Summary
 
@@ -25,8 +25,9 @@ the visible gain is smaller.
 | Does it survive multi-chip mesh layouts? | Yes. A follow-up on `v5litepod-4` tested `fsdp=4,tp=1`, `fsdp=2,tp=2`, and `fsdp=1,tp=4`; matched passing rows showed 53-66% per-chip XLA planned HBM reduction and CCE moved the context frontier in all three meshes. |
 | Did multi-chip expose a throughput pitfall? | Yes. The repeated `fsdp=2,tp=2` default chunk row was a real outlier: b16/L512 CCE was about 97x slower than Default CE. Larger TPU chunk settings reduced that same row from 15.37s/step to 0.83s/step without increasing XLA HBM. |
 | Does the pattern transfer beyond 270M? | Yes through the tested 4B/E4B frontier rows. On `v5litepod-4`, Gemma3 1B b16 moved from L256 to L512 and b32 moved from no Default CE fit to L256; Gemma4 E2B b4 moved from L256 to L512. On `v5litepod-8`, Gemma3 4B b4 moved from L512 to L1024; Gemma4 E4B b4 moved from L256 to L512 and b8 moved from no Default CE fit to L256. |
+| Does it transfer outside Gemma? | Yes in a focused Qwen3 0.6B check on `v5litepod-1`: b4 moved from L512 with Default CE to L1024 with CCE, and the matched b4/L512 row dropped from 8.40 to 7.08 GiB/chip. |
 | Where did it stop moving the frontier? | In the focused Gemma3 12B/27B rerun on the same `v5litepod-8`, CCE still reduced planned HBM but did not create a new passing batch/context shape. At that scale and mesh, other model buffers dominated the peak. |
-| What TPU was used? | The primary 270M rerun used Cloud TPU `v5litepod-1`, one chip, in `us-west4-a`. Mesh and 1B/E2B transfer checks used `v5litepod-4`, four chips. 4B/E4B and 12B/27B focused boundary checks used `v5litepod-8`, eight chips. A final Tunix distributed smoke used `v5litepod-16` for 12B and `v5litepod-32` for 27B. |
+| What TPU was used? | The primary 270M rerun and Qwen3 0.6B transfer check used Cloud TPU `v5litepod-1`, one chip, in `us-west4-a`. Mesh and 1B/E2B transfer checks used `v5litepod-4`, four chips. 4B/E4B and 12B/27B focused boundary checks used `v5litepod-8`, eight chips. A final Tunix distributed smoke used `v5litepod-16` for 12B and `v5litepod-32` for 27B. |
 
 The memory metric used throughout the new 270M plots is **max per-chip XLA
 buffer-assignment planned HBM**. This is the number that decides whether a TPU
@@ -44,7 +45,8 @@ The report supports five claims:
 3. The drop-in Tunix patch works on both single-chip and four-chip Gemma3 270M
    LoRA jobs, but throughput depends on mesh layout and chunk policy.
 4. The same frontier pattern transfers to Gemma3 1B, Gemma4 E2B, Gemma3 4B,
-   and Gemma4 E4B under the tested FSDP-only setups.
+   Gemma4 E4B, and a focused non-Gemma Qwen3 0.6B check under the tested
+   setups.
 5. The Gemma3 12B/27B boundary check is a negative transfer result: CCE still
    saves HBM, but the saved amount is not enough to move the fit boundary on
    the tested eight-chip setup.
@@ -109,6 +111,7 @@ larger.
 | Gemma4 E4B | `v5litepod-8`, `fsdp=8,tp=1` | focused frontier grid, CCE chunk grid | not run |
 | Gemma3 12B | `v5litepod-8`, `fsdp=8,tp=1` | focused boundary grid | not run |
 | Gemma3 27B | `v5litepod-8`, `fsdp=8,tp=1` | focused boundary grid | not run |
+| Qwen3 0.6B | `v5litepod-1`, `fsdp=1,tp=1` | focused frontier, rank, chunk grid | not run |
 
 Those transfer rows are deliberately smaller than the 270M evidence package.
 Their purpose is to test whether the same memory/frontier story survives model
@@ -455,6 +458,41 @@ The distributed logs confirm `process_count=4`, `global_devices=16` for 12B
 and `process_count=8`, `global_devices=32` for 27B. The runtime peak in this
 table is the artifact host's local four-chip aggregate, not the whole pod.
 
+### Non-Gemma Qwen3 0.6B Check
+
+The Gemma rows test model scale inside one family. To check whether the patch is
+only a Gemma adapter trick, we also ran a focused Qwen3 0.6B LoRA sweep using
+the HuggingFace model path `Qwen/Qwen3-0.6B`, Cloud TPU `v5litepod-1`, one chip,
+and `fsdp=1,tp=1`.
+
+![Qwen3 0.6B CCE transfer](./assets/qwen3_0p6b_cce_transfer.png)
+
+The Qwen result is smaller than the Gemma3 270M package, but it answers the
+right transfer question. At b4, Default CE fit L512 and failed L1024; CCE fit
+L1024. At the matched b4/L512 shape, planned HBM dropped from 8.40 to
+7.08 GiB/chip. At the newly opened b4/L1024 shape, Default CE planned
+16.15 GiB/chip and failed, while CCE completed at 14.13 GiB/chip.
+
+| Qwen3 0.6B shape | Default CE | Default XLA HBM | CCE | CCE XLA HBM |
+| --- | --- | ---: | --- | ---: |
+| b1/L2048 | OK | retained as frontier | OK | retained as frontier |
+| b4/L512 | OK | 8.40 GiB/chip | OK | 7.08 GiB/chip |
+| b4/L1024 | compile OOM | 16.15 GiB/chip | OK | 14.13 GiB/chip |
+| b16/L256 | OK | retained as frontier | OK | retained as frontier |
+
+Rank and chunk behavior also looked familiar. For b4/L1024, LoRA rank 16 and
+64 failed under Default CE and completed under CCE. Vocab chunk choice barely
+moved planned HBM, while step time varied enough to justify shape-specific
+chunk tuning.
+
+![Qwen3 0.6B CCE chunk tuning](./assets/qwen3_0p6b_cce_chunk_tuning.png)
+
+The negative row is also useful: b1/L4096 remained OOM under aggressive CCE
+chunk settings, with plans around 20.5 GiB/chip. In other words, Qwen3 0.6B
+shows the same bounded story as Gemma: CCE moves the frontier when the loss
+logits are the active wall, but once another buffer dominates, smaller chunks
+alone do not solve the shape.
+
 ## 6. Real EN-FR Training Parity
 
 The systems sweeps prove memory behavior, not usefulness. For a training sanity
@@ -653,8 +691,23 @@ Gemma3 12B / 27B focused boundary package:
 - `01-CCE/assets/gemma3_12b_27b_cce_focused_frontier.png`
 - `01-CCE/assets/gemma3_12b_27b_cce_focused_hbm.png`
 
+Qwen3 0.6B focused non-Gemma transfer package:
+
+- `01-CCE/data/qwen3_0p6b_cce_transfer/run_manifest.csv`
+- `01-CCE/data/qwen3_0p6b_cce_transfer/frontier_summary.csv`
+- `01-CCE/data/qwen3_0p6b_cce_transfer/matched_boundary.csv`
+- `01-CCE/data/qwen3_0p6b_cce_transfer/rank_sensitivity.csv`
+- `01-CCE/data/qwen3_0p6b_cce_transfer/chunk_tuning.csv`
+- `01-CCE/data/qwen3_0p6b_cce_transfer/aggressive_l4096_negative.csv`
+- `01-CCE/assets/qwen3_0p6b_cce_transfer.png`
+- `01-CCE/assets/qwen3_0p6b_cce_chunk_tuning.png`
+
 Lower-level audit files are also kept beside those summaries, including
 `frontier_runs.csv`, `rank_sensitivity.csv`, `mesh_runs.csv`, `repeat_runs.csv`,
 and per-run manifests. Compressed raw worker artifacts are retained under the
 corresponding `raw_artifacts/` directories. Extracted `raw/` directories are
 reproducible from those tarballs and should not be committed.
+
+The Qwen3 CCE transfer tables are compact reconstructions from retained worker
+log values. The TPU became SSH-unstable during raw artifact recovery and was
+deleted to avoid leaving an unattended VM running.

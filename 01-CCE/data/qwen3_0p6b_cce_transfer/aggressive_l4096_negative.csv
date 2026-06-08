@@ -1,0 +1,6 @@
+variant,batch_size,max_length,lora_rank,token_chunk,vocab_chunk,status,xla_gib_per_chip
+CCE,1,4096,16,16,2048,compile_oom,20.49
+CCE,1,4096,16,16,4096,compile_oom,20.49
+CCE,1,4096,16,16,8192,compile_oom,20.49
+CCE,1,4096,16,16,16384,compile_oom,20.51
+CCE,1,4096,16,16,32768,compile_oom,20.51

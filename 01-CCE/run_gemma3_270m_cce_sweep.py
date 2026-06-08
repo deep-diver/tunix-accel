@@ -102,6 +102,16 @@ MODEL_PRESETS = {
         "allow_download": True,
         "enable_gemma4_hf_loader": True,
     },
+    "qwen3_0p6b": {
+        "label": "Qwen3 0.6B",
+        "model_id": "Qwen/Qwen3-0.6B",
+        "model_source": "huggingface",
+        "model_path": "",
+        "tokenizer_source": "huggingface",
+        "tokenizer_path": "",
+        "allow_download": True,
+        "enable_gemma4_hf_loader": False,
+    },
 }
 
 ENV_KEYS = {
@@ -235,6 +245,8 @@ def configure_env(
       "TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION": "0",
       "XLA_FLAGS": f"--xla_dump_to={xla_dir} --xla_dump_hlo_as_text",
   })
+  if args.model_source == "huggingface":
+    env.setdefault("HF_TOKEN", "")
   if args.enable_gemma4_hf_loader:
     env["TUNIX_ACCEL_ENABLE_GEMMA4_HF_LOADER"] = "1"
   if variant == "default":

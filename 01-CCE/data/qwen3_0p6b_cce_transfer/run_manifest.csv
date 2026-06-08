@@ -1,0 +1,2 @@
+model,model_id,tpu,chips,mesh,zone,source
+Qwen3 0.6B,Qwen/Qwen3-0.6B,v5litepod-1,1,"fsdp=1,tp=1",us-west4-a,transcribed from live runner log and CSV-tail checks; TPU VM SSH became unstable before artifact tar recovery

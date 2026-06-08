@@ -2,8 +2,8 @@
 
 This report makes one deliberately narrow claim: for Gemma LoRA SFT on
 JAX/Tunix, sequence packing turns padding-heavy fixed rows into useful target
-tokens. Gemma3 270M is the exhaustive base case, Gemma3 1B is the same-shape
-transfer check. Packing is a data-density and useful-token-throughput
+tokens. Gemma3 270M is the exhaustive base case. Gemma3 1B and Qwen3 0.6B are
+transfer checks. Packing is a data-density and useful-token-throughput
 optimization, not a fixed-shape memory optimization.
 
 ## Executive Summary
@@ -13,12 +13,12 @@ optimization, not a fixed-shape memory optimization.
 | What is being optimized? | Padding waste. Packing combines multiple short SFT examples into one fixed-length row while preserving per-example positions and block-causal attention. |
 | How much padding waste was available? | On OPUS100 EN-FR with the Gemma tokenizer and batch 16, fixed unpacked density fell from 24.9% at L256 to 3.2% at L2048, while packed density stayed around 98.6-99.8%. |
 | Does this depend on the dataset? | Yes. OPUS100 EN-FR showed the largest gain, Alpaca remained strong, and OASST1 showed a smaller but still clear gain as examples became longer and less padding-heavy. |
-| Does it improve useful-token throughput? | Yes. On the original OPUS matched-shape runs, target-token throughput improved by 21.2x to 40.1x; the b4 dataset ablation reached 78.9x at OPUS L2048. The Gemma3 1B transfer check showed the same pattern: OPUS L2048 improved 72.7x-73.2x, Alpaca L2048 improved 26.5x-28.0x, and OASST1 L2048 improved 9.7x-10.2x. |
+| Does it improve useful-token throughput? | Yes. On the original OPUS matched-shape runs, target-token throughput improved by 21.2x to 40.1x; the b4 dataset ablation reached 78.9x at OPUS L2048. The Gemma3 1B transfer check showed the same pattern: OPUS L2048 improved 72.7x-73.2x, Alpaca L2048 improved 26.5x-28.0x, and OASST1 L2048 improved 9.7x-10.2x. The Qwen3 0.6B check showed OPUS gains of 19.7x-21.2x at L512 on one chip and 42.5x at b4/L1024 on four chips. |
 | Does same-shape step time change? | Barely in this setup. Packed/unpacked step-time ratios were 0.982x, 1.006x, and 1.004x for the passing matched shapes. |
 | Does useful-token training finish faster? | Yes for token budget. Packed reached the unpacked run's 1.75M target-token budget at step 528 in 88s of cumulative step time, versus 5,000 unpacked steps in 564s. |
 | Is the optimizer trajectory identical? | No. Packing changes the number of target tokens per optimizer update. Loss should be compared by useful tokens and interpreted with that optimizer-step difference in mind. |
 | What is the memory claim? | There is no memory-saving claim. Planned HBM rows are retained only as a negative control showing that packing does not move the fixed-shape fit frontier. |
-| Does the 270M result transfer? | Yes for Gemma3 1B under the tested 32-chip setup. The dataset ordering and long-context gains remain the same. |
+| Does the 270M result transfer? | Yes for Gemma3 1B and Qwen3 0.6B under the tested setups. The dataset ordering and long-context gains remain the same. |
 
 ## Experiment Scope
 
@@ -29,19 +29,21 @@ optimization, not a fixed-shape memory optimization.
 | LoRA rank / alpha | rank 16, alpha 32 |
 | Main training dataset | OPUS100 EN-FR |
 | Dataset ablation | OPUS100 EN-FR, Alpaca, OASST1 EN |
-| Transfer check | Gemma3 1B on OPUS100 EN-FR, Alpaca, OASST1 EN |
-| Prompt format | Gemma IT translation wrapper |
+| Transfer check | Gemma3 1B and Qwen3 0.6B on OPUS100 EN-FR, Alpaca, OASST1 EN |
+| Prompt format | OPUS quality rows used the Gemma IT translation wrapper; throughput ablations used dataset-specific SFT records with target-only masks |
 | Loss mask | target-only |
-| TPU | Cloud TPU `v5litepod-1`, 1 chip for the 270M base case; `v5litepod-32`, 32 chips for the 1B transfer check |
+| TPU | Cloud TPU `v5litepod-1`, 1 chip for the 270M base case; `v5litepod-32`, 32 chips for the 1B transfer check; `v5litepod-1` and `v5litepod-4` for the Qwen3 0.6B transfer check |
 | Zone | `us-west4-a` |
-| Mesh | `fsdp=1,tp=1` for 270M; `fsdp=8,tp=4` for Gemma3 1B |
+| Mesh | `fsdp=1,tp=1` for 270M; `fsdp=8,tp=4` for Gemma3 1B; `fsdp=1,tp=1` and `fsdp=4,tp=1` for Qwen3 0.6B |
 | CE path | Default Tunix CE |
 | Other patches | CCE, Tiled MLP, activation policy, and Splash Attention disabled |
 
 The local density sweeps used 5k and 20k OPUS100 examples. The dataset
 ablation used 5k examples per dataset. The 270M TPU runs used 5k examples on
 `v5litepod-1`, one chip. The 1B transfer check used the same 5k-example dataset
-matrix on `v5litepod-32`, 32 chips, with `fsdp=8,tp=4`.
+matrix on `v5litepod-32`, 32 chips, with `fsdp=8,tp=4`. The Qwen3 0.6B transfer
+check used the same three datasets, with one-chip L512 rows and four-chip L1024
+rows where the longer context fit.
 
 ## 1. The Dataset Has a Large Packing Opportunity
 
@@ -95,7 +97,7 @@ For absolute measured throughput, the retained TPU rows are:
 
 ![Gemma3 270M dataset TPU absolute throughput](./assets/gemma3_270m_dataset_tpu_absolute_throughput.png)
 
-## 3. The 1B Transfer Check Preserves the Story
+## 3. Transfer Checks Preserve the Story
 
 The 270M result should not be read as a tiny-model curiosity. To check transfer
 without changing the claim, the same short-throughput matrix was run on
@@ -126,6 +128,30 @@ This 1B run also exposed a practical sharding note. On `v5litepod-16` and on
 1B matrix therefore uses `fsdp=8,tp=4`. That setup detail affects fit, but it
 does not change the packing interpretation: once the fixed shape fits, packing
 fills that shape with useful tokens instead of padding.
+
+The non-Gemma Qwen3 0.6B check keeps the same interpretation. It used
+`Qwen/Qwen3-0.6B`, one-chip L512 rows on `v5litepod-1`, and four-chip L1024 rows
+on `v5litepod-4`. The result is again dataset-shaped: OPUS benefits most,
+Alpaca remains strong, and OASST1 is smaller because its examples are already
+longer.
+
+![Qwen3 0.6B packing transfer](./assets/qwen3_0p6b_packing_transfer.png)
+
+| Dataset / shape | TPU | Useful-token throughput gain | Interpretation |
+| --- | --- | ---: | --- |
+| OPUS b4/L512 | `v5litepod-1` | 21.2x | Short translation examples; high padding waste. |
+| OPUS b8/L512 | `v5litepod-1` | 19.7x | Same dataset pattern at larger batch. |
+| OPUS b4/L1024 | `v5litepod-4` | 42.5x | Longer context amplifies padding waste once the shape fits. |
+| Alpaca b4/L512 | `v5litepod-1` | 8.2x | Short-to-medium instruction rows. |
+| Alpaca b4/L1024 | `v5litepod-4` | 13.5x | Longer context increases the packing opportunity. |
+| OASST1 b4/L512 | `v5litepod-1` | 2.8x | Longer assistant turns; less padding to remove. |
+| OASST1 b4/L1024 | `v5litepod-4` | 4.8x | Still useful, but much less dramatic than OPUS. |
+
+The right panel is the negative control. Packed and unpacked have the same
+fixed `(batch, length)` shape, so they also share the same fit wall: at
+four-chip b4/L2048, both variants are OOM with the same planned-HBM band. This
+is exactly what we want from the claim boundary. Packing changes how much useful
+training data each row carries; it does not make a fixed row cheaper to compile.
 
 ## 4. The Throughput Gain Is Real When the Shape Fits
 
@@ -262,6 +288,8 @@ Processed tables:
 - `data/processed/gemma3_270m_dataset_ablation_summary.json`
 - `data/processed/gemma3_1b_packing_transfer_v5litepod32.csv`
 - `data/processed/gemma3_1b_packing_transfer_pairs_v5litepod32.csv`
+- `data/processed/qwen3_0p6b_packing_transfer.csv`
+- `data/processed/qwen3_0p6b_packing_transfer_pairs.csv`
 
 Local density tables:
 
@@ -279,3 +307,4 @@ Compressed raw TPU artifacts:
 - `data/raw_artifacts/gemma3_270m_dataset_sweep_alpaca_v5litepod1/*.tgz`
 - `data/raw_artifacts/gemma3_270m_dataset_sweep_oasst1_v5litepod1/*.tgz`
 - `data/transfer_1b/raw/gemma3_1b_transfer32_tp4_results.tar.gz`
+- `data/raw_artifacts/qwen3_0p6b/*.tar.gz`

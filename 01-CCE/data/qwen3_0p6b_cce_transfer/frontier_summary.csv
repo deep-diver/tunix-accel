@@ -1,0 +1,9 @@
+batch_size,variant,max_context
+1,Default CE,2048
+1,CCE,2048
+4,Default CE,512
+4,CCE,1024
+16,Default CE,256
+16,CCE,256
+64,Default CE,0
+64,CCE,0

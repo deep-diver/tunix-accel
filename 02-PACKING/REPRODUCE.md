@@ -2,7 +2,8 @@
 
 This guide reproduces the retained 02-PACKING package: local packing-density
 sweeps, Gemma3 270M Tunix LoRA SFT runs on Cloud TPU `v5litepod-1`, the
-Gemma3 1B transfer check on `v5litepod-32`.
+Gemma3 1B transfer check on `v5litepod-32`, and the Qwen3 0.6B transfer check
+on `v5litepod-1` / `v5litepod-4`.
 
 ## Local Setup
 
@@ -86,6 +87,12 @@ artifact is present:
 
 ```bash
 python3 02-PACKING/aggregate_gemma3_1b_transfer.py
+```
+
+The Qwen3 0.6B transfer figures are regenerated from the retained raw tarballs:
+
+```bash
+python3 02-PACKING/aggregate_qwen3_0p6b_transfer.py
 ```
 
 ## TPU Setup
@@ -282,6 +289,80 @@ raw directory is absent:
 
 ```bash
 python3 02-PACKING/aggregate_gemma3_1b_transfer.py
+```
+
+## Qwen3 0.6B Transfer Run
+
+The retained Qwen3 0.6B transfer check used the same three datasets and default
+CE. One-chip rows collected b4/b8 at L512. Four-chip rows collected b4 at L1024
+where the longer shape fit.
+
+| Field | One-chip rows | Four-chip rows |
+| --- | --- | --- |
+| TPU type | `v5litepod-1` | `v5litepod-4` |
+| Chips | 1 | 4 |
+| Model | `Qwen/Qwen3-0.6B` | `Qwen/Qwen3-0.6B` |
+| Model source | HuggingFace | HuggingFace |
+| Mesh | `fsdp=1,tp=1` | `fsdp=4,tp=1` |
+| Datasets | OPUS100 EN-FR, Alpaca, OASST1 EN | OPUS100 EN-FR, Alpaca, OASST1 EN |
+| Steps | 50 LoRA SFT steps per case | 50 LoRA SFT steps per case |
+
+Example one-chip command:
+
+```bash
+for ds in opus100 alpaca oasst1; do
+  DATASET_MODE=${ds} \
+  MODEL_ID=Qwen/Qwen3-0.6B \
+  MODEL_SOURCE=huggingface \
+  MODEL_PATH= \
+  TOKENIZER_SOURCE=huggingface \
+  TOKENIZER_PATH= \
+  TPU_TYPE=v5litepod-1 \
+  CHIPS=1 \
+  MESH_FSDP=1 \
+  MESH_TP=1 \
+  BATCH_SIZES=4,8 \
+  CONTEXTS=512 \
+  NUM_EXAMPLES=5000 \
+  MAX_STEPS=50 \
+  OUT_BASE=/tmp/qwen3-0p6b-packing/${ds} \
+  bash 02-PACKING/remote_gemma3_270m_packing_worker.sh short-throughput
+done
+```
+
+Example four-chip command:
+
+```bash
+for ds in opus100 alpaca oasst1; do
+  DATASET_MODE=${ds} \
+  MODEL_ID=Qwen/Qwen3-0.6B \
+  MODEL_SOURCE=huggingface \
+  MODEL_PATH= \
+  TOKENIZER_SOURCE=huggingface \
+  TOKENIZER_PATH= \
+  TPU_TYPE=v5litepod-4 \
+  CHIPS=4 \
+  MESH_FSDP=4 \
+  MESH_TP=1 \
+  BATCH_SIZES=4 \
+  CONTEXTS=1024,2048 \
+  NUM_EXAMPLES=5000 \
+  MAX_STEPS=50 \
+  OUT_BASE=/tmp/qwen3-0p6b-packing4/${ds} \
+  bash 02-PACKING/remote_gemma3_270m_packing_worker.sh short-throughput
+done
+```
+
+Place the compressed CSV artifacts under:
+
+```text
+02-PACKING/data/raw_artifacts/qwen3_0p6b/
+```
+
+Then regenerate locally:
+
+```bash
+python3 02-PACKING/aggregate_qwen3_0p6b_transfer.py
 ```
 
 ## Collect Artifacts

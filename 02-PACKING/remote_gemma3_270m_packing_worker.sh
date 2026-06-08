@@ -53,16 +53,13 @@ fi
 export PYTHONUNBUFFERED=1
 export HF_HUB_ENABLE_HF_TRANSFER=0
 export HF_HUB_DISABLE_PROGRESS_BARS=1
+export HF_TOKEN="${HF_TOKEN:-}"
 export PYTHONPATH="${ROOT}:${PYTHONPATH:-}"
 export TUNIX_ACCEL_DISABLE_AUTOPATCH=1
 export TUNIX_ACCEL_DISABLE_CE=1
 export TUNIX_ACCEL_DISABLE_TILED_MLP=1
 export TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY=1
 export TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION=0
-if [[ "${MODEL_ID:-}" == *"gemma-4"* ]]; then
-  export TUNIX_ACCEL_ENABLE_GEMMA4_HF_LOADER="${TUNIX_ACCEL_ENABLE_GEMMA4_HF_LOADER:-1}"
-  export TUNIX_ACCEL_MODEL_DOWNLOAD_PATH="${TUNIX_ACCEL_MODEL_DOWNLOAD_PATH:-${OUT_BASE}/hf-cache/${MODEL_ID##*/}}"
-fi
 
 normalize_source() {
   case "$1" in
@@ -75,15 +72,31 @@ run_sweep() {
   local distributed_args=()
   local model_source
   local tokenizer_source
+  local default_model_path
+  local default_tokenizer_path
   model_source="$(normalize_source "${MODEL_SOURCE-gcs}")"
   tokenizer_source="$(normalize_source "${TOKENIZER_SOURCE-sentencepiece}")"
+  if [[ "${model_source}" == "huggingface" ]]; then
+    default_model_path=""
+    export TUNIX_ACCEL_MODEL_DOWNLOAD_PATH="${TUNIX_ACCEL_MODEL_DOWNLOAD_PATH:-${OUT_BASE}/hf-cache/${MODEL_ID##*/}}"
+  else
+    default_model_path="gs://gemma-data/checkpoints/gemma3-270m-it"
+  fi
+  if [[ "${tokenizer_source}" == "huggingface" ]]; then
+    default_tokenizer_path=""
+  else
+    default_tokenizer_path="gs://gemma-data/tokenizers/tokenizer_gemma3.model"
+  fi
+  if [[ "${MODEL_ID:-}" == *"gemma-4"* ]]; then
+    export TUNIX_ACCEL_ENABLE_GEMMA4_HF_LOADER="${TUNIX_ACCEL_ENABLE_GEMMA4_HF_LOADER:-1}"
+  fi
   local model_args=(
     --model-id "${MODEL_ID-google/gemma-3-270m-it}"
     --model-source "${model_source}"
-    --model-path "${MODEL_PATH-gs://gemma-data/checkpoints/gemma3-270m-it}"
+    --model-path "${MODEL_PATH-${default_model_path}}"
     --model-download-path "${MODEL_DOWNLOAD_PATH:-${TUNIX_ACCEL_MODEL_DOWNLOAD_PATH:-}}"
     --tokenizer-source "${tokenizer_source}"
-    --tokenizer-path "${TOKENIZER_PATH-gs://gemma-data/tokenizers/tokenizer_gemma3.model}"
+    --tokenizer-path "${TOKENIZER_PATH-${default_tokenizer_path}}"
   )
   if [[ "${ALLOW_DOWNLOAD:-0}" == "1" ]]; then
     model_args+=(--allow-download)

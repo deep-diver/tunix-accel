@@ -39,6 +39,7 @@ ENV_KEYS = {
 MODEL_LABELS = {
     "google/gemma-3-270m-it": "Gemma3 270M",
     "google/gemma-3-1b-it": "Gemma3 1B",
+    "qwen/qwen3-0.6b": "Qwen3 0.6B",
 }
 
 
@@ -143,7 +144,7 @@ def cleanup_xla_dir(xla_dir: Path, *, keep_all_xla: bool) -> None:
       path.unlink(missing_ok=True)
 
 
-def configure_env(*, xla_dir: Path) -> dict[str, str]:
+def configure_env(*, args: argparse.Namespace, xla_dir: Path) -> dict[str, str]:
   env = os.environ.copy()
   for key in ENV_KEYS:
     env.pop(key, None)
@@ -157,6 +158,8 @@ def configure_env(*, xla_dir: Path) -> dict[str, str]:
       "TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION": "0",
       "XLA_FLAGS": f"--xla_dump_to={xla_dir} --xla_dump_hlo_as_text",
   })
+  if args.model_source == "huggingface":
+    env.setdefault("HF_TOKEN", "")
   return env
 
 
@@ -258,7 +261,7 @@ def run_case(
   else:
     shutil.rmtree(run_dir, ignore_errors=True)
     xla_dir.mkdir(parents=True, exist_ok=True)
-    env = configure_env(xla_dir=xla_dir)
+    env = configure_env(args=args, xla_dir=xla_dir)
     command = command_for_case(
         args=args,
         run_dir=run_dir,

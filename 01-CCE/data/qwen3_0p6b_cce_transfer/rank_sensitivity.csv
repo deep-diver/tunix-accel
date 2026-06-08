@@ -1,0 +1,13 @@
+variant,lora_rank,batch_size,max_length,status,xla_gib_per_chip,step_time_sec
+Default CE,4,4,512,ok,8.37,0.160066116
+Default CE,4,4,1024,ok,14.18,0.279575147
+CCE,4,4,512,ok,7.05,0.179752395
+CCE,4,4,1024,ok,14.13,0.371209179
+Default CE,16,4,512,ok,8.4,0.158079967
+Default CE,16,4,1024,compile_oom,16.15,
+CCE,16,4,512,ok,7.08,0.181282124
+CCE,16,4,1024,ok,14.13,0.364449409
+Default CE,64,4,512,ok,8.53,0.1152801
+Default CE,64,4,1024,compile_oom,16.26,
+CCE,64,4,512,ok,7.21,0.180314104
+CCE,64,4,1024,ok,14.09,0.365127938

@@ -1,9 +1,10 @@
-# Reproducing the Gemma CCE Rerun and Transfer Checks
+# Reproducing the CCE Rerun and Transfer Checks
 
 This guide reproduces the final 01-CCE package: the exhaustive Gemma3 270M CCE
 rerun, the four-chip Gemma3 1B / Gemma4 E2B transfer checks, and the focused
-eight-chip Gemma3 4B / Gemma4 E4B transfer checks. It intentionally keeps
-Packing, Tiled MLP, Activation Policy, and Splash Attention disabled.
+eight-chip Gemma3 4B / Gemma4 E4B transfer checks, plus the focused Qwen3 0.6B
+non-Gemma transfer check. It intentionally keeps Packing, Tiled MLP, Activation
+Policy, and Splash Attention disabled.
 
 ## Retained Artifacts
 
@@ -26,6 +27,8 @@ Main report and figures:
 - `01-CCE/assets/gemma_cce_large_transfer_frontier.png`
 - `01-CCE/assets/gemma_cce_large_transfer_pressure.png`
 - `01-CCE/assets/gemma_cce_large_transfer_chunk_tuning.png`
+- `01-CCE/assets/qwen3_0p6b_cce_transfer.png`
+- `01-CCE/assets/qwen3_0p6b_cce_chunk_tuning.png`
 
 Compact rerun data:
 
@@ -62,6 +65,11 @@ Compact rerun data:
 - `01-CCE/data/gemma_4b_e4b_cce_transfer/matched_metrics.csv`
 - `01-CCE/data/gemma_4b_e4b_cce_transfer/pressure_points.csv`
 - `01-CCE/data/gemma_4b_e4b_cce_transfer/chunk_summary.csv`
+- `01-CCE/data/qwen3_0p6b_cce_transfer/frontier_summary.csv`
+- `01-CCE/data/qwen3_0p6b_cce_transfer/matched_boundary.csv`
+- `01-CCE/data/qwen3_0p6b_cce_transfer/rank_sensitivity.csv`
+- `01-CCE/data/qwen3_0p6b_cce_transfer/chunk_tuning.csv`
+- `01-CCE/data/qwen3_0p6b_cce_transfer/aggressive_l4096_negative.csv`
 
 Compressed raw worker outputs:
 
@@ -138,6 +146,8 @@ Gemma3 1B and Gemma4 E2B transfer checks also used `v5litepod-4`, four chips,
 with `fsdp=4,tp=1` as the primary mesh.
 Gemma3 4B and Gemma4 E4B focused transfer checks used `v5litepod-8`, eight
 chips, with `fsdp=8,tp=1`.
+The Qwen3 0.6B transfer check used `v5litepod-1`, one chip, with
+`MODEL_SIZE=qwen3_0p6b` and the HuggingFace model `Qwen/Qwen3-0.6B`.
 
 Create one TPU VM per independent profile when you want maximum parallelism:
 
@@ -218,6 +228,28 @@ bash 01-CCE/remote_gemma3_270m_cce_worker.sh chunk
 bash 01-CCE/remote_gemma3_270m_cce_worker.sh quality-default
 bash 01-CCE/remote_gemma3_270m_cce_worker.sh quality-cce
 bash 01-CCE/remote_gemma3_270m_cce_worker.sh quality-capacity
+```
+
+Qwen3 0.6B uses the same worker, with the model preset changed:
+
+```bash
+MODEL_SIZE=qwen3_0p6b \
+  OUT_BASE=/tmp/qwen3-0p6b-cce \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh frontier-low
+
+MODEL_SIZE=qwen3_0p6b \
+  OUT_BASE=/tmp/qwen3-0p6b-cce \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh rank
+
+MODEL_SIZE=qwen3_0p6b \
+  OUT_BASE=/tmp/qwen3-0p6b-cce \
+  bash 01-CCE/remote_gemma3_270m_cce_worker.sh chunk
+```
+
+Regenerate the retained compact Qwen3 transfer tables and plots locally:
+
+```bash
+python3 01-CCE/collect_qwen3_0p6b_cce_transfer_results.py
 ```
 
 Run the mesh profiles on `v5litepod-4` workers:

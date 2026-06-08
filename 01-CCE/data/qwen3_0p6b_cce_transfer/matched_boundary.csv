@@ -1,0 +1,5 @@
+suite,variant,batch_size,max_length,lora_rank,status,xla_gib_per_chip,step_time_sec
+b4_matched_boundary,Default CE,4,512,16,ok,8.4,0.0933439315
+b4_matched_boundary,CCE,4,512,16,ok,7.08,0.133994157
+b4_matched_boundary,Default CE,4,1024,16,compile_oom,16.15,
+b4_matched_boundary,CCE,4,1024,16,ok,14.13,0.321312895
