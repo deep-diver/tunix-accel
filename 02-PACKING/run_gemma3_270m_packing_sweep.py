@@ -36,6 +36,12 @@ ENV_KEYS = {
     "TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION",
 }
 
+MODEL_LABELS = {
+    "google/gemma-3-270m-it": "Gemma3 270M",
+    "google/gemma-3-1b-it": "Gemma3 1B",
+    "google/gemma-4-e2b": "Gemma4 E2B",
+}
+
 
 def parse_csv_ints(value: str) -> list[int]:
   return [int(item.strip()) for item in value.split(",") if item.strip()]
@@ -43,6 +49,10 @@ def parse_csv_ints(value: str) -> list[int]:
 
 def parse_csv_strings(value: str) -> list[str]:
   return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def model_label(model_id: str) -> str:
+  return MODEL_LABELS.get(model_id.lower(), model_id.split("/")[-1])
 
 
 def write_json(path: Path, obj: Any) -> None:
@@ -170,6 +180,8 @@ def command_for_case(
       args.model_source,
       "--model-path",
       args.model_path,
+      "--model-download-path",
+      args.model_download_path,
       "--tokenizer-source",
       args.tokenizer_source,
       "--tokenizer-path",
@@ -280,7 +292,7 @@ def run_case(
   row: dict[str, Any] = {
       "suite": suite,
       "case": case_name,
-      "model": "Gemma3 270M",
+      "model": model_label(args.model_id),
       "model_id": args.model_id,
       "tpu": args.tpu,
       "chips": args.chips,
@@ -387,6 +399,7 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--model-id", default="google/gemma-3-270m-it")
   parser.add_argument("--model-source", default="gcs")
   parser.add_argument("--model-path", default="gs://gemma-data/checkpoints/gemma3-270m-it")
+  parser.add_argument("--model-download-path", default="")
   parser.add_argument("--tokenizer-source", default="sentencepiece")
   parser.add_argument("--tokenizer-path", default="gs://gemma-data/tokenizers/tokenizer_gemma3.model")
   parser.add_argument("--allow-download", action="store_true")

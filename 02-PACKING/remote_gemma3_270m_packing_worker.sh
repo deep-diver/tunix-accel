@@ -59,9 +59,24 @@ export TUNIX_ACCEL_DISABLE_CE=1
 export TUNIX_ACCEL_DISABLE_TILED_MLP=1
 export TUNIX_ACCEL_DISABLE_ACTIVATION_POLICY=1
 export TUNIX_ACCEL_ENABLE_SPLASH_ATTENTION=0
+if [[ "${MODEL_ID:-}" == *"gemma-4"* ]]; then
+  export TUNIX_ACCEL_ENABLE_GEMMA4_HF_LOADER="${TUNIX_ACCEL_ENABLE_GEMMA4_HF_LOADER:-1}"
+  export TUNIX_ACCEL_MODEL_DOWNLOAD_PATH="${TUNIX_ACCEL_MODEL_DOWNLOAD_PATH:-${OUT_BASE}/hf-cache/${MODEL_ID##*/}}"
+fi
 
 run_sweep() {
-  python 02-PACKING/run_gemma3_270m_packing_sweep.py "$@"
+  local model_args=(
+    --model-id "${MODEL_ID-google/gemma-3-270m-it}"
+    --model-source "${MODEL_SOURCE-gcs}"
+    --model-path "${MODEL_PATH-gs://gemma-data/checkpoints/gemma3-270m-it}"
+    --model-download-path "${MODEL_DOWNLOAD_PATH:-${TUNIX_ACCEL_MODEL_DOWNLOAD_PATH:-}}"
+    --tokenizer-source "${TOKENIZER_SOURCE-sentencepiece}"
+    --tokenizer-path "${TOKENIZER_PATH-gs://gemma-data/tokenizers/tokenizer_gemma3.model}"
+  )
+  if [[ "${ALLOW_DOWNLOAD:-0}" == "1" ]]; then
+    model_args+=(--allow-download)
+  fi
+  python 02-PACKING/run_gemma3_270m_packing_sweep.py "${model_args[@]}" "$@"
 }
 
 case "${SUITE}" in
@@ -88,10 +103,10 @@ case "${SUITE}" in
       --num-examples "${NUM_EXAMPLES:-5000}" \
       --max-steps "${MAX_STEPS:-50}" \
       --skip-quality-eval \
-      --tpu v5litepod-1 \
-      --chips 1 \
-      --mesh-fsdp 1 \
-      --mesh-tp 1 \
+      --tpu "${TPU_TYPE:-v5litepod-1}" \
+      --chips "${CHIPS:-1}" \
+      --mesh-fsdp "${MESH_FSDP:-${CHIPS:-1}}" \
+      --mesh-tp "${MESH_TP:-1}" \
       --force \
       --outdir "${OUT_BASE}/short-throughput"
     ;;
@@ -108,10 +123,10 @@ case "${SUITE}" in
       --eval-examples "${EVAL_EXAMPLES:-512}" \
       --eval-batches "${EVAL_BATCHES:-32}" \
       --generation-examples "${GENERATION_EXAMPLES:-0}" \
-      --tpu v5litepod-1 \
-      --chips 1 \
-      --mesh-fsdp 1 \
-      --mesh-tp 1 \
+      --tpu "${TPU_TYPE:-v5litepod-1}" \
+      --chips "${CHIPS:-1}" \
+      --mesh-fsdp "${MESH_FSDP:-${CHIPS:-1}}" \
+      --mesh-tp "${MESH_TP:-1}" \
       --force \
       --outdir "${OUT_BASE}/quality-unpacked"
     ;;
@@ -128,10 +143,10 @@ case "${SUITE}" in
       --eval-examples "${EVAL_EXAMPLES:-512}" \
       --eval-batches "${EVAL_BATCHES:-32}" \
       --generation-examples "${GENERATION_EXAMPLES:-0}" \
-      --tpu v5litepod-1 \
-      --chips 1 \
-      --mesh-fsdp 1 \
-      --mesh-tp 1 \
+      --tpu "${TPU_TYPE:-v5litepod-1}" \
+      --chips "${CHIPS:-1}" \
+      --mesh-fsdp "${MESH_FSDP:-${CHIPS:-1}}" \
+      --mesh-tp "${MESH_TP:-1}" \
       --force \
       --outdir "${OUT_BASE}/quality-packed"
     ;;
