@@ -231,10 +231,12 @@ def tokenize_sft_record(
     source: str,
     target: str,
     example_id: int,
+    prompt_text: str | None = None,
 ) -> dict[str, Any]:
-  prompt_text = (
-      INPUT_TEMPLATE_IT["prefix"] + source + INPUT_TEMPLATE_IT["suffix"]
-  )
+  if prompt_text is None:
+    prompt_text = (
+        INPUT_TEMPLATE_IT["prefix"] + source + INPUT_TEMPLATE_IT["suffix"]
+    )
   prompt_ids = encode(prompt_text)
   answer_ids = encode(target) + [eos_id]
   input_ids = prompt_ids + answer_ids
@@ -257,6 +259,12 @@ def load_opus100_records(
 ) -> TokenizedSftDataset:
   if args.dataset_mode == "synthetic":
     return load_synthetic_records(args, tokenizer_bundle)
+  if args.dataset_mode == "alpaca":
+    return load_alpaca_records(args, tokenizer_bundle)
+  if args.dataset_mode == "oasst1":
+    return load_oasst1_records(args, tokenizer_bundle)
+  if args.dataset_mode == "cnn_dailymail":
+    return load_cnn_dailymail_records(args, tokenizer_bundle)
 
   from datasets import load_dataset  # pylint: disable=import-outside-toplevel
 
@@ -288,6 +296,143 @@ def load_opus100_records(
       source=(
           "Helsinki-NLP/opus-100 en-fr train split, Tunix Gemma3 IT prompt "
           "wrapper, target-only loss mask, target EOS"
+      ),
+  )
+
+
+def gemma_instruction_prompt(text: str) -> str:
+  return (
+      "<start_of_turn>user\n"
+      f"{text.strip()}\n"
+      "<end_of_turn>\n"
+      "<start_of_turn>model\n"
+  )
+
+
+def load_alpaca_records(
+    args: argparse.Namespace,
+    tokenizer_bundle: TokenizerBundle | None = None,
+) -> TokenizedSftDataset:
+  from datasets import load_dataset  # pylint: disable=import-outside-toplevel
+
+  tokenizer_bundle = tokenizer_bundle or load_tokenizer(args)
+  dataset = load_dataset("tatsu-lab/alpaca", split=f"train[:{args.num_examples}]")
+  records = []
+  for idx, row in enumerate(dataset):
+    instruction = str(row.get("instruction", "")).strip()
+    input_text = str(row.get("input", "")).strip()
+    if input_text:
+      source = f"Instruction:\n{instruction}\n\nInput:\n{input_text}"
+    else:
+      source = f"Instruction:\n{instruction}"
+    target = str(row.get("output", "")).strip()
+    records.append(
+        tokenize_sft_record(
+            encode=tokenizer_bundle.encode,
+            eos_id=tokenizer_bundle.eos_id,
+            source=source,
+            target=target,
+            prompt_text=gemma_instruction_prompt(source),
+            example_id=idx,
+        )
+    )
+  return TokenizedSftDataset(
+      name="alpaca-gemma3-it",
+      model_id=args.model_id,
+      tokenizer_source=args.tokenizer_source,
+      pad_token_id=tokenizer_bundle.pad_id,
+      records=records,
+      source=(
+          "tatsu-lab/alpaca train split, Gemma3 IT instruction wrapper, "
+          "target-only loss mask, target EOS"
+      ),
+  )
+
+
+def load_oasst1_records(
+    args: argparse.Namespace,
+    tokenizer_bundle: TokenizerBundle | None = None,
+) -> TokenizedSftDataset:
+  from datasets import load_dataset  # pylint: disable=import-outside-toplevel
+
+  tokenizer_bundle = tokenizer_bundle or load_tokenizer(args)
+  dataset = load_dataset("OpenAssistant/oasst1", split="train")
+  rows = [row for row in dataset if str(row.get("lang", "")).lower() == "en"]
+  by_id = {row.get("message_id"): row for row in rows}
+  records = []
+  for row in rows:
+    if row.get("role") != "assistant":
+      continue
+    parent = by_id.get(row.get("parent_id"))
+    if not parent or parent.get("role") not in {"prompter", "user"}:
+      continue
+    source = str(parent.get("text", "")).strip()
+    target = str(row.get("text", "")).strip()
+    if not source or not target:
+      continue
+    records.append(
+        tokenize_sft_record(
+            encode=tokenizer_bundle.encode,
+            eos_id=tokenizer_bundle.eos_id,
+            source=source,
+            target=target,
+            prompt_text=gemma_instruction_prompt(source),
+            example_id=len(records),
+        )
+    )
+    if len(records) >= args.num_examples:
+      break
+  return TokenizedSftDataset(
+      name="oasst1-en-assistant-gemma3-it",
+      model_id=args.model_id,
+      tokenizer_source=args.tokenizer_source,
+      pad_token_id=tokenizer_bundle.pad_id,
+      records=records,
+      source=(
+          "OpenAssistant/oasst1 English assistant replies with immediate "
+          "prompter parent as prompt, Gemma3 IT wrapper, target-only loss"
+      ),
+  )
+
+
+def load_cnn_dailymail_records(
+    args: argparse.Namespace,
+    tokenizer_bundle: TokenizerBundle | None = None,
+) -> TokenizedSftDataset:
+  from datasets import load_dataset  # pylint: disable=import-outside-toplevel
+
+  tokenizer_bundle = tokenizer_bundle or load_tokenizer(args)
+  dataset = load_dataset(
+      "cnn_dailymail",
+      "3.0.0",
+      split=f"train[:{args.num_examples}]",
+  )
+  records = []
+  for idx, row in enumerate(dataset):
+    source = (
+        "Summarize the following article:\n\n"
+        + str(row.get("article", "")).strip()
+    )
+    target = str(row.get("highlights", "")).strip()
+    records.append(
+        tokenize_sft_record(
+            encode=tokenizer_bundle.encode,
+            eos_id=tokenizer_bundle.eos_id,
+            source=source,
+            target=target,
+            prompt_text=gemma_instruction_prompt(source),
+            example_id=idx,
+        )
+    )
+  return TokenizedSftDataset(
+      name="cnn-dailymail-summary-gemma3-it",
+      model_id=args.model_id,
+      tokenizer_source=args.tokenizer_source,
+      pad_token_id=tokenizer_bundle.pad_id,
+      records=records,
+      source=(
+          "cnn_dailymail 3.0.0 train split, article summarization prompt, "
+          "Gemma3 IT wrapper, target-only loss mask"
       ),
   )
 
@@ -401,9 +546,25 @@ def filter_overlength(
     records: list[dict[str, Any]],
     *,
     max_length: int,
+    policy: str = "drop",
 ) -> tuple[list[dict[str, Any]], int]:
-  kept = [record for record in records if len(record["input_ids"]) <= max_length]
-  return kept, len(records) - len(kept)
+  if policy == "drop":
+    kept = [record for record in records if len(record["input_ids"]) <= max_length]
+    return kept, len(records) - len(kept)
+  if policy == "truncate":
+    kept = []
+    changed = 0
+    for record in records:
+      if len(record["input_ids"]) > max_length:
+        changed += 1
+      kept.append({
+          **record,
+          "input_ids": record["input_ids"][:max_length],
+          "labels": record["labels"][:max_length],
+          "loss_mask": record["loss_mask"][:max_length],
+      })
+    return kept, changed
+  raise ValueError(f"Unknown long example policy: {policy!r}")
 
 
 def make_unpacked_batches(
@@ -508,7 +669,11 @@ def prepare_variant(
     dataset: TokenizedSftDataset,
     args: argparse.Namespace,
 ) -> PreparedVariant:
-  records, dropped = filter_overlength(dataset.records, max_length=args.max_length)
+  records, dropped = filter_overlength(
+      dataset.records,
+      max_length=args.max_length,
+      policy=args.long_example_policy,
+  )
   if not records:
     raise ValueError(
         f"No records fit max_length={args.max_length}; cannot train {variant}."
@@ -1021,6 +1186,7 @@ def run_variant(
         eval_records, eval_dropped = filter_overlength(
             eval_records,
             max_length=args.max_length,
+            policy=args.long_example_policy,
         )
         eval_batches, eval_metrics = make_unpacked_batches(
             eval_records,
@@ -1149,6 +1315,7 @@ def run_variant(
       "source_examples_loaded": len(dataset.records),
       "source_examples_fit": prepared.source_examples,
       "dropped_overlength": prepared.dropped_overlength,
+      "long_example_policy": args.long_example_policy,
       "prepared_batches": len(prepared.batches),
       "repeats_data": args.max_steps > len(prepared.batches),
       "final_loss": losses[-1] if losses else math.nan,
@@ -1350,8 +1517,9 @@ def write_prepare_only_outputs(
         "variant": prepared.name,
         "source_examples_loaded": len(dataset.records),
         "source_examples_fit": prepared.source_examples,
-        "dropped_overlength": prepared.dropped_overlength,
-        "prepared_batches": len(prepared.batches),
+      "dropped_overlength": prepared.dropped_overlength,
+      "long_example_policy": args.long_example_policy,
+      "prepared_batches": len(prepared.batches),
         "batch_size": args.batch_size,
         "max_length": args.max_length,
         "mean_valid_ratio": mean_valid_ratio,
@@ -1386,7 +1554,7 @@ def main() -> None:
   parser.add_argument("--allow-download", action="store_true")
   parser.add_argument(
       "--dataset-mode",
-      choices=["opus100", "synthetic"],
+      choices=["opus100", "synthetic", "alpaca", "oasst1", "cnn_dailymail"],
       default="opus100",
   )
   parser.add_argument("--num-examples", type=int, default=5000)
@@ -1416,6 +1584,16 @@ def main() -> None:
           "best_fit_decreasing",
       ],
       default="best_fit_decreasing",
+  )
+  parser.add_argument(
+      "--long-example-policy",
+      choices=["drop", "truncate"],
+      default="drop",
+      help=(
+          "How to handle examples longer than max_length before batching. "
+          "Existing OPUS100 report runs used drop; dataset-profile sweeps "
+          "usually use truncate to preserve the length distribution."
+      ),
   )
   parser.add_argument("--mesh-fsdp", type=int, default=0)
   parser.add_argument("--mesh-tp", type=int, default=0)

@@ -57,6 +57,29 @@ python3 02-PACKING/run_gemma_tokenizer_benchmark.py \
 
 The retained copies live under `02-PACKING/data/local_density/`.
 
+## Dataset and Max-Length Preflight
+
+Before spending TPU time on a new SFT dataset, run the tokenizer-only profile.
+It measures target-mask density, row reduction, retained target tokens, and
+packing opportunity without loading Gemma weights:
+
+```bash
+python3 02-PACKING/run_dataset_profile_benchmark.py \
+  --datasets opus100,alpaca,oasst1 \
+  --num-examples 5000 \
+  --batch-sizes 8,16,32 \
+  --max-lengths 256,512,1024,2048,4096 \
+  --outdir 02-PACKING/results/dataset-profile-270m \
+  --allow-download
+```
+
+Regenerate the retained profile/TPU ablation figures after TPU artifacts are
+collected:
+
+```bash
+python3 02-PACKING/aggregate_dataset_sweep.py
+```
+
 ## TPU Setup
 
 The rerun used:
@@ -77,6 +100,19 @@ Create three TPU VMs if you want the same parallel layout:
 
 ```bash
 for name in tunix-pack270-short tunix-pack270-unpack tunix-pack270-packed; do
+  gcloud compute tpus tpu-vm create "$name" \
+    --project=gcp-ml-172005 \
+    --zone=us-west4-a \
+    --accelerator-type=v5litepod-1 \
+    --version=v2-alpha-tpuv5-lite
+done
+```
+
+For the dataset/max-length ablation, use one `v5litepod-1` per dataset so the
+three 50-step sweeps can run in parallel:
+
+```bash
+for name in tunix-pack270-opus tunix-pack270-alpaca tunix-pack270-oasst; do
   gcloud compute tpus tpu-vm create "$name" \
     --project=gcp-ml-172005 \
     --zone=us-west4-a \
@@ -127,6 +163,28 @@ wheels, disables unrelated acceleration patches, and writes outputs under:
 /tmp/gemma3-270m-packing/
 ```
 
+Dataset/max-length short-throughput sweeps:
+
+```bash
+gcloud compute tpus tpu-vm ssh tunix-pack270-opus \
+  --project=gcp-ml-172005 \
+  --zone=us-west4-a \
+  --command 'cd ~/TUNIX-TRY && DATASET_MODE=opus100 LONG_EXAMPLE_POLICY=truncate BATCH_SIZES=4,8,16 CONTEXTS=256,512,1024,2048 NUM_EXAMPLES=5000 MAX_STEPS=50 OUT_BASE=/tmp/gemma3-270m-packing-dataset/opus100 bash 02-PACKING/remote_gemma3_270m_packing_worker.sh short-throughput'
+
+gcloud compute tpus tpu-vm ssh tunix-pack270-alpaca \
+  --project=gcp-ml-172005 \
+  --zone=us-west4-a \
+  --command 'cd ~/TUNIX-TRY && DATASET_MODE=alpaca LONG_EXAMPLE_POLICY=truncate BATCH_SIZES=4,8,16 CONTEXTS=256,512,1024,2048 NUM_EXAMPLES=5000 MAX_STEPS=50 OUT_BASE=/tmp/gemma3-270m-packing-dataset/alpaca bash 02-PACKING/remote_gemma3_270m_packing_worker.sh short-throughput'
+
+gcloud compute tpus tpu-vm ssh tunix-pack270-oasst \
+  --project=gcp-ml-172005 \
+  --zone=us-west4-a \
+  --command 'cd ~/TUNIX-TRY && DATASET_MODE=oasst1 LONG_EXAMPLE_POLICY=truncate BATCH_SIZES=4,8,16 CONTEXTS=256,512,1024,2048 NUM_EXAMPLES=5000 MAX_STEPS=50 OUT_BASE=/tmp/gemma3-270m-packing-dataset/oasst1 bash 02-PACKING/remote_gemma3_270m_packing_worker.sh short-throughput'
+
+```
+
+In the retained rerun, OPUS100, Alpaca, and OASST1 were collected successfully.
+
 ## Collect Artifacts
 
 Compress remote outputs:
@@ -156,10 +214,19 @@ Copy tarballs back into:
 02-PACKING/data/raw_artifacts/gemma3_270m_quality_packed_v5litepod1/
 ```
 
+Dataset sweep tarballs use:
+
+```text
+02-PACKING/data/raw_artifacts/gemma3_270m_dataset_sweep_opus100_v5litepod1/
+02-PACKING/data/raw_artifacts/gemma3_270m_dataset_sweep_alpaca_v5litepod1/
+02-PACKING/data/raw_artifacts/gemma3_270m_dataset_sweep_oasst1_v5litepod1/
+```
+
 Then regenerate processed tables and plots:
 
 ```bash
 python3 02-PACKING/visualize_270m_results.py
+python3 02-PACKING/aggregate_dataset_sweep.py
 ```
 
 The visualizer extracts the raw `.tgz` files if the raw directories are not

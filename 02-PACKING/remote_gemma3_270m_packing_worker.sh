@@ -67,7 +67,8 @@ run_sweep() {
 case "${SUITE}" in
   prepare)
     python 02-PACKING/run_gemma_training_benchmark.py \
-      --dataset-mode opus100 \
+      --dataset-mode "${DATASET_MODE:-opus100}" \
+      --long-example-policy "${LONG_EXAMPLE_POLICY:-drop}" \
       --num-examples "${NUM_EXAMPLES:-5000}" \
       --variants unpacked,packed \
       --batch-size "${BATCH_SIZE:-16}" \
@@ -82,7 +83,8 @@ case "${SUITE}" in
       --variants unpacked,packed \
       --batch-sizes "${BATCH_SIZES:-8,16,32}" \
       --contexts "${CONTEXTS:-512,1024}" \
-      --dataset-mode opus100 \
+      --dataset-mode "${DATASET_MODE:-opus100}" \
+      --long-example-policy "${LONG_EXAMPLE_POLICY:-drop}" \
       --num-examples "${NUM_EXAMPLES:-5000}" \
       --max-steps "${MAX_STEPS:-50}" \
       --skip-quality-eval \
@@ -99,7 +101,8 @@ case "${SUITE}" in
       --variants unpacked \
       --batch-sizes "${BATCH_SIZES:-16}" \
       --contexts "${CONTEXTS:-512}" \
-      --dataset-mode opus100 \
+      --dataset-mode "${DATASET_MODE:-opus100}" \
+      --long-example-policy "${LONG_EXAMPLE_POLICY:-drop}" \
       --num-examples "${NUM_EXAMPLES:-5000}" \
       --max-steps "${MAX_STEPS:-5000}" \
       --eval-examples "${EVAL_EXAMPLES:-512}" \
@@ -118,7 +121,8 @@ case "${SUITE}" in
       --variants packed \
       --batch-sizes "${BATCH_SIZES:-16}" \
       --contexts "${CONTEXTS:-512}" \
-      --dataset-mode opus100 \
+      --dataset-mode "${DATASET_MODE:-opus100}" \
+      --long-example-policy "${LONG_EXAMPLE_POLICY:-drop}" \
       --num-examples "${NUM_EXAMPLES:-5000}" \
       --max-steps "${MAX_STEPS:-1000}" \
       --eval-examples "${EVAL_EXAMPLES:-512}" \

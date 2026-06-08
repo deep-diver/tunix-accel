@@ -16,6 +16,9 @@ model transfer checks are considered.
 - `run_gemma3_270m_packing_sweep.py`: TPU case-grid runner.
 - `remote_gemma3_270m_packing_worker.sh`: TPU VM wrapper.
 - `visualize_270m_results.py`: processed table and plot generator.
+- `run_dataset_profile_benchmark.py`: tokenizer-only dataset/max-length
+  preflight sweep.
+- `aggregate_dataset_sweep.py`: dataset ablation table and plot generator.
 - `assets/`: final figures used by the report.
 - `data/local_density/`: retained local density sweep CSVs.
 - `data/processed/`: compact TPU result tables and summary JSON.
@@ -69,3 +72,8 @@ Sequence packing is not a fixed-shape memory optimizer. On Gemma3 270M
 The gain is instead useful-token density: at b16/L512, target-token throughput
 rose from about 1.54k/s to 32.6k/s while same-shape step time stayed within
 0.4%.
+
+The rerun also checks dataset transfer on Gemma3 270M. OPUS100 EN-FR and Alpaca
+show the strongest max-length gains, while OASST1 remains clearly positive but
+less dramatic as its examples are longer and already fill more of each fixed
+row.

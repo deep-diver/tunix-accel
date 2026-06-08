@@ -176,6 +176,8 @@ def command_for_case(
       args.tokenizer_path,
       "--dataset-mode",
       args.dataset_mode,
+      "--long-example-policy",
+      args.long_example_policy,
       "--num-examples",
       str(args.num_examples),
       "--variants",
@@ -290,6 +292,7 @@ def run_case(
       "lora_rank": args.lora_rank,
       "max_steps": max_steps,
       "dataset_mode": args.dataset_mode,
+      "long_example_policy": args.long_example_policy,
       "run_dir": str(run_dir),
       "xla_report": str(report) if report else "",
       "xla_train_step_gib_per_chip": parse_xla_total_gib(report),
@@ -391,7 +394,16 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--variants", default="unpacked,packed")
   parser.add_argument("--batch-sizes", default="8,16,32")
   parser.add_argument("--contexts", default="512,1024")
-  parser.add_argument("--dataset-mode", choices=["synthetic", "opus100"], default="opus100")
+  parser.add_argument(
+      "--dataset-mode",
+      choices=["synthetic", "opus100", "alpaca", "oasst1", "cnn_dailymail"],
+      default="opus100",
+  )
+  parser.add_argument(
+      "--long-example-policy",
+      choices=["drop", "truncate"],
+      default="drop",
+  )
   parser.add_argument("--num-examples", type=int, default=5000)
   parser.add_argument("--max-steps", type=int, default=50)
   parser.add_argument("--learning-rate", type=float, default=2e-4)

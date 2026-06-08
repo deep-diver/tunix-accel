@@ -10,8 +10,9 @@ fixed-shape memory optimization.
 | Question | Result |
 | --- | --- |
 | What is being optimized? | Padding waste. Packing combines multiple short SFT examples into one fixed-length row while preserving per-example positions and block-causal attention. |
-| How much padding waste was available? | With the Gemma tokenizer and batch 16, fixed unpacked density fell from 24.9% at L256 to 3.2% at L2048, while packed density stayed around 98.6-99.8%. |
-| Does it improve useful-token throughput? | Yes. On passing short runs, target-token throughput improved by 21.2x to 40.1x. |
+| How much padding waste was available? | On OPUS100 EN-FR with the Gemma tokenizer and batch 16, fixed unpacked density fell from 24.9% at L256 to 3.2% at L2048, while packed density stayed around 98.6-99.8%. |
+| Does this depend on the dataset? | Yes. OPUS100 EN-FR showed the largest gain, Alpaca remained strong, and OASST1 showed a smaller but still clear gain as examples became longer and less padding-heavy. |
+| Does it improve useful-token throughput? | Yes. On the original OPUS matched-shape runs, target-token throughput improved by 21.2x to 40.1x; the b4 dataset ablation reached 78.9x at OPUS L2048. |
 | Does same-shape step time change? | Barely in this setup. Packed/unpacked step-time ratios were 0.982x, 1.006x, and 1.004x for the passing matched shapes. |
 | Does useful-token training finish faster? | Yes for token budget. Packed reached the unpacked run's 1.75M target-token budget at step 528 in 88s of cumulative step time, versus 5,000 unpacked steps in 564s. |
 | Is the optimizer trajectory identical? | No. Packing changes the number of target tokens per optimizer update. Loss should be compared by useful tokens and interpreted with that optimizer-step difference in mind. |
@@ -24,7 +25,8 @@ fixed-shape memory optimization.
 | Model | `google/gemma-3-270m-it` |
 | Training mode | Tunix PEFT/LoRA |
 | LoRA rank / alpha | rank 16, alpha 32 |
-| Dataset | OPUS100 EN-FR |
+| Main training dataset | OPUS100 EN-FR |
+| Dataset ablation | OPUS100 EN-FR, Alpaca, OASST1 EN |
 | Prompt format | Gemma IT translation wrapper |
 | Loss mask | target-only |
 | TPU | Cloud TPU `v5litepod-1`, 1 chip |
@@ -33,9 +35,9 @@ fixed-shape memory optimization.
 | CE path | Default Tunix CE |
 | Other patches | CCE, Tiled MLP, activation policy, and Splash Attention disabled |
 
-The local density sweeps used 5k and 20k OPUS100 examples. The TPU runs used
-5k examples. All TPU figures and tables below come from `v5litepod-1`, one
-chip.
+The local density sweeps used 5k and 20k OPUS100 examples. The dataset
+ablation used 5k examples per dataset. The TPU runs used 5k examples. All TPU
+figures and tables below come from `v5litepod-1`, one chip.
 
 ## 1. The Dataset Has a Large Packing Opportunity
 
@@ -59,7 +61,37 @@ training content.
 | 1024 | 6.3% | 37.1% | 99.6% | 15.8x |
 | 2048 | 3.2% | 36.9% | 99.8% | 31.6x |
 
-## 2. The Throughput Gain Is Real When the Shape Fits
+## 2. Dataset Shape Decides the Gain
+
+Packing is model-agnostic at the mechanism level, but the payoff is not
+dataset-agnostic. It depends on how many supervised target tokens survive inside
+each fixed row. To test that directly, the 270M rerun added a max-length sweep
+over three SFT-like datasets: OPUS100 EN-FR, Alpaca, and OASST1 English
+assistant turns.
+
+![Gemma3 270M dataset ablation](./assets/gemma3_270m_dataset_ablation.png)
+
+The left panel is tokenizer-only. It asks how much target-token density packing
+could recover before any model is loaded. The right panel is the corresponding
+measured TPU gain for the collected short runs, using the same Gemma3 270M
+LoRA setup on one `v5litepod-1` chip with batch 4 and 50 measured steps.
+
+| Dataset | L512 profile gain | L2048 profile gain | L512 TPU gain | L2048 TPU gain | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| OPUS EN-FR | 9.2x | 34.8x | 23.1x | 78.9x | Very short examples; longer context mostly creates padding unless packed. |
+| Alpaca | 6.0x | 24.1x | 8.5x | 26.5x | Short-to-medium instruction records; strong and stable packing case. |
+| OASST1 EN | 2.3x | 8.5x | 2.6x | 10.3x | Longer conversational turns; still useful, but less dramatic. |
+
+This is the cleanest way to read packing: max length amplifies the win only
+when examples are short relative to the row. OPUS and Alpaca therefore improve
+as context length grows. OASST improves more slowly because its examples are
+longer and already fill more of each fixed row.
+
+For absolute measured throughput, the retained TPU rows are:
+
+![Gemma3 270M dataset TPU absolute throughput](./assets/gemma3_270m_dataset_tpu_absolute_throughput.png)
+
+## 3. The Throughput Gain Is Real When the Shape Fits
 
 For the passing matched shapes, step time stayed in the same band while
 target-token throughput increased sharply.
@@ -77,7 +109,7 @@ target-token density is especially low at that shape. The model is doing about
 the same fixed-shape work either way; packed batches simply waste far fewer
 positions.
 
-## 3. Useful-Token Budget View
+## 4. Useful-Token Budget View
 
 The quality sanity run used b16/L512 for both variants:
 
@@ -109,7 +141,7 @@ The eval losses are retained only as a sanity check that both jobs completed
 normal Tunix training and evaluation. They are not presented as a translation
 quality benchmark.
 
-## 4. Non-Claim Check: Same Shape, Same Planned HBM
+## 5. Non-Claim Check: Same Shape, Same Planned HBM
 
 The short TPU matrix also records planned HBM, but only as a guardrail. Packing
 changes token layout and masks inside a fixed row; it does not change
@@ -134,7 +166,7 @@ because CE logits or attention activations exceed HBM, packing alone will not
 make that shape fit. That job belongs to memory-path optimizations such as CCE
 or activation-memory work.
 
-## 5. Implementation Notes
+## 6. Implementation Notes
 
 The implementation has two layers:
 
@@ -164,11 +196,13 @@ Because packing does not touch the loss function, it composes with CCE. The 270M
 rerun deliberately disabled CCE so that the sequence-packing claim stayed
 isolated.
 
-## 6. Interpretation
+## 7. Interpretation
 
 The clean message is:
 
 - Use packing when SFT examples are short relative to the chosen max length.
+- Preflight the dataset first; model size is secondary to sequence length and
+  target-mask density for this optimization.
 - Expect useful-token throughput to rise roughly with target-token density.
 - Treat optimizer-step parity and useful-token parity as different experiment
   designs.
@@ -179,7 +213,7 @@ In other words, packing is the right lever for padding waste. It is not the
 right lever for dense loss logits, attention activation memory, or model-state
 sharding.
 
-## 7. Retained Artifacts
+## 8. Retained Artifacts
 
 Processed tables:
 
@@ -187,6 +221,9 @@ Processed tables:
 - `data/processed/gemma3_270m_short_throughput_v5litepod1.csv`
 - `data/processed/gemma3_270m_quality_v5litepod1.csv`
 - `data/processed/gemma3_270m_quality_history_v5litepod1.csv`
+- `data/processed/gemma3_270m_dataset_profile.csv`
+- `data/processed/gemma3_270m_dataset_tpu_sweep_v5litepod1.csv`
+- `data/processed/gemma3_270m_dataset_ablation_summary.json`
 
 Local density tables:
 
@@ -200,3 +237,6 @@ Compressed raw TPU artifacts:
 - `data/raw_artifacts/gemma3_270m_short_throughput_v5litepod1/*.tgz`
 - `data/raw_artifacts/gemma3_270m_quality_unpacked_v5litepod1/*.tgz`
 - `data/raw_artifacts/gemma3_270m_quality_packed_v5litepod1/*.tgz`
+- `data/raw_artifacts/gemma3_270m_dataset_sweep_opus100_v5litepod1/*.tgz`
+- `data/raw_artifacts/gemma3_270m_dataset_sweep_alpaca_v5litepod1/*.tgz`
+- `data/raw_artifacts/gemma3_270m_dataset_sweep_oasst1_v5litepod1/*.tgz`
