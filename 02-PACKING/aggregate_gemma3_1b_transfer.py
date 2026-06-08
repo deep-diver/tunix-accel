@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Aggregate Gemma3 1B / Gemma4 E2B packing transfer checks."""
+"""Aggregate Gemma3 1B packing transfer checks."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 ASSETS = ROOT / "assets"
 PROCESSED = DATA / "processed"
-RAW_TRANSFER = DATA / "transfer_1b_e2b" / "raw"
+RAW_TRANSFER = DATA / "transfer_1b" / "raw"
 
 DATASET_ORDER = ["opus100", "alpaca", "oasst1"]
 DATASET_LABELS = {
@@ -93,7 +93,10 @@ def ensure_gemma3_1b_raw_base() -> Path:
     )
   extracted_root.mkdir(parents=True, exist_ok=True)
   with tarfile.open(tar_path) as tar:
-    tar.extractall(extracted_root)
+    try:
+      tar.extractall(extracted_root, filter="data")
+    except TypeError:
+      tar.extractall(extracted_root)
   return base
 
 
@@ -198,45 +201,6 @@ def make_pair_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "row_reduction_x": packed["row_reduction_x"],
         })
   return pairs
-
-
-def write_e2b_boundary() -> list[dict[str, Any]]:
-  rows = [
-      {
-          "model_label": "Gemma4 E2B",
-          "dataset_slug": "opus100",
-          "dataset_label": DATASET_LABELS["opus100"],
-          "batch_size": 8,
-          "max_length": 2048,
-          "variant": "unpacked",
-          "tpu": "v5litepod-32",
-          "chips": 32,
-          "mesh": "fsdp=8,tp=4",
-          "status": "resource_exhausted",
-          "failure_detail": (
-              "all-gather allocation 37,580,963,840 bytes exceeds "
-              "17,179,869,184-byte per-chip HBM"
-          ),
-      },
-      {
-          "model_label": "Gemma4 E2B",
-          "dataset_slug": "opus100",
-          "dataset_label": DATASET_LABELS["opus100"],
-          "batch_size": 8,
-          "max_length": 2048,
-          "variant": "unpacked",
-          "tpu": "v5litepod-32",
-          "chips": 32,
-          "mesh": "fsdp=4,tp=8",
-          "status": "resource_exhausted",
-          "failure_detail": (
-              "same all-gather allocation observed under TP=8; current "
-              "Gemma4 E2B runner did not shard that buffer further"
-          ),
-      },
-  ]
-  write_csv(PROCESSED / "gemma4_e2b_packing_boundary_v5litepod32.csv", rows)
-  return rows
 
 
 def plot_gemma3_1b_transfer(pairs: list[dict[str, Any]]) -> Path:
@@ -389,14 +353,13 @@ def plot_memory_neutrality(pairs: list[dict[str, Any]]) -> Path:
 def main() -> None:
   rows = load_gemma3_1b_rows()
   pairs = make_pair_rows(rows)
-  e2b = write_e2b_boundary()
   write_csv(PROCESSED / "gemma3_1b_packing_transfer_v5litepod32.csv", rows)
   write_csv(PROCESSED / "gemma3_1b_packing_transfer_pairs_v5litepod32.csv", pairs)
   plot_paths = [
       plot_gemma3_1b_transfer(pairs),
       plot_memory_neutrality(pairs),
   ]
-  print(f"wrote rows={len(rows)} pairs={len(pairs)} e2b_boundary={len(e2b)}")
+  print(f"wrote rows={len(rows)} pairs={len(pairs)}")
   for path in plot_paths:
     print(path)
 

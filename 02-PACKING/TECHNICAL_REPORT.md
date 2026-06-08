@@ -3,9 +3,8 @@
 This report makes one deliberately narrow claim: for Gemma LoRA SFT on
 JAX/Tunix, sequence packing turns padding-heavy fixed rows into useful target
 tokens. Gemma3 270M is the exhaustive base case, Gemma3 1B is the same-shape
-transfer check, and Gemma4 E2B is retained only as a fixed-graph fit boundary.
-Packing is a data-density and useful-token-throughput optimization, not a
-fixed-shape memory optimization.
+transfer check. Packing is a data-density and useful-token-throughput
+optimization, not a fixed-shape memory optimization.
 
 ## Executive Summary
 
@@ -19,7 +18,7 @@ fixed-shape memory optimization.
 | Does useful-token training finish faster? | Yes for token budget. Packed reached the unpacked run's 1.75M target-token budget at step 528 in 88s of cumulative step time, versus 5,000 unpacked steps in 564s. |
 | Is the optimizer trajectory identical? | No. Packing changes the number of target tokens per optimizer update. Loss should be compared by useful tokens and interpreted with that optimizer-step difference in mind. |
 | What is the memory claim? | There is no memory-saving claim. Planned HBM rows are retained only as a negative control showing that packing does not move the fixed-shape fit frontier. |
-| Does the 270M result transfer? | Yes for Gemma3 1B under the tested 32-chip setup. Gemma4 E2B did not reach the requested b8/L2048 shape on v5litepod-32 because the current runner hit an unsharded all-gather HBM wall. |
+| Does the 270M result transfer? | Yes for Gemma3 1B under the tested 32-chip setup. The dataset ordering and long-context gains remain the same. |
 
 ## Experiment Scope
 
@@ -127,19 +126,6 @@ This 1B run also exposed a practical sharding note. On `v5litepod-16` and on
 1B matrix therefore uses `fsdp=8,tp=4`. That setup detail affects fit, but it
 does not change the packing interpretation: once the fixed shape fits, packing
 fills that shape with useful tokens instead of padding.
-
-Gemma4 E2B was tried as the next transfer point, but the requested b8/L2048
-shape did not fit on `v5litepod-32`. Both `fsdp=8,tp=4` and `fsdp=4,tp=8`
-hit the same all-gather allocation:
-
-| Model | TPU | Mesh | Shape | Result |
-| --- | --- | --- | --- | --- |
-| Gemma4 E2B | `v5litepod-32`, 32 chips | `fsdp=8,tp=4` | b8/L2048 | OOM: 37.58GB all-gather allocation over 17.18GB/chip HBM |
-| Gemma4 E2B | `v5litepod-32`, 32 chips | `fsdp=4,tp=8` | b8/L2048 | Same all-gather OOM; current runner did not shard that buffer further |
-
-This is not a packing failure. It is a fixed-shape model execution boundary.
-Packing cannot help if the model graph cannot compile or run the unpacked shape
-in the first place.
 
 ## 4. The Throughput Gain Is Real When the Shape Fits
 
@@ -276,7 +262,6 @@ Processed tables:
 - `data/processed/gemma3_270m_dataset_ablation_summary.json`
 - `data/processed/gemma3_1b_packing_transfer_v5litepod32.csv`
 - `data/processed/gemma3_1b_packing_transfer_pairs_v5litepod32.csv`
-- `data/processed/gemma4_e2b_packing_boundary_v5litepod32.csv`
 
 Local density tables:
 
@@ -293,4 +278,4 @@ Compressed raw TPU artifacts:
 - `data/raw_artifacts/gemma3_270m_dataset_sweep_opus100_v5litepod1/*.tgz`
 - `data/raw_artifacts/gemma3_270m_dataset_sweep_alpaca_v5litepod1/*.tgz`
 - `data/raw_artifacts/gemma3_270m_dataset_sweep_oasst1_v5litepod1/*.tgz`
-- `data/transfer_1b_e2b/raw/gemma3_1b_transfer32_tp4_results.tar.gz`
+- `data/transfer_1b/raw/gemma3_1b_transfer32_tp4_results.tar.gz`

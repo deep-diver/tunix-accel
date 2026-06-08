@@ -39,7 +39,6 @@ ENV_KEYS = {
 MODEL_LABELS = {
     "google/gemma-3-270m-it": "Gemma3 270M",
     "google/gemma-3-1b-it": "Gemma3 1B",
-    "google/gemma-4-e2b": "Gemma4 E2B",
 }
 
 

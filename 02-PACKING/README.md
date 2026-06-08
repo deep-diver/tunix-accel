@@ -2,7 +2,7 @@
 
 This directory contains the retained artifacts for the Sequence Packing
 workstream. It is rebuilt around Gemma3 270M as the exhaustive base case, with
-a Gemma3 1B transfer check and a Gemma4 E2B boundary check.
+a Gemma3 1B transfer check.
 
 ## Contents
 
@@ -19,8 +19,7 @@ a Gemma3 1B transfer check and a Gemma4 E2B boundary check.
 - `run_dataset_profile_benchmark.py`: tokenizer-only dataset/max-length
   preflight sweep.
 - `aggregate_dataset_sweep.py`: dataset ablation table and plot generator.
-- `aggregate_transfer_1b_e2b.py`: Gemma3 1B transfer and Gemma4 E2B boundary
-  table/plot generator.
+- `aggregate_gemma3_1b_transfer.py`: Gemma3 1B transfer table/plot generator.
 - `assets/`: final figures used by the report.
 - `data/local_density/`: retained local density sweep CSVs.
 - `data/processed/`: compact TPU result tables and summary JSON.
@@ -31,7 +30,7 @@ Extracted raw TPU directories are intentionally ignored. Recreate them from the
 
 ```bash
 python3 02-PACKING/visualize_270m_results.py
-python3 02-PACKING/aggregate_transfer_1b_e2b.py
+python3 02-PACKING/aggregate_gemma3_1b_transfer.py
 ```
 
 The patch implementation itself lives outside this directory in
@@ -81,6 +80,4 @@ Alpaca show the strongest max-length gains, while OASST1 remains clearly
 positive but less dramatic as its examples are longer and already fill more of
 each fixed row. The same ordering transfers to Gemma3 1B on `v5litepod-32`
 with mesh `fsdp=8,tp=4`: at L2048, OPUS improves about 73x, Alpaca about 27x,
-and OASST1 about 10x in loss-token throughput. Gemma4 E2B is retained as a
-boundary check: b8/L2048 hit an unsharded all-gather HBM wall on `v5litepod-32`,
-so packing cannot be evaluated until the fixed model graph fits.
+and OASST1 about 10x in loss-token throughput.

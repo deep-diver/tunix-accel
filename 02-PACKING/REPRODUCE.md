@@ -2,7 +2,7 @@
 
 This guide reproduces the retained 02-PACKING package: local packing-density
 sweeps, Gemma3 270M Tunix LoRA SFT runs on Cloud TPU `v5litepod-1`, the
-Gemma3 1B transfer check on `v5litepod-32`, and the Gemma4 E2B boundary smoke.
+Gemma3 1B transfer check on `v5litepod-32`.
 
 ## Local Setup
 
@@ -85,7 +85,7 @@ The 1B transfer figures are regenerated separately after the transfer raw
 artifact is present:
 
 ```bash
-python3 02-PACKING/aggregate_transfer_1b_e2b.py
+python3 02-PACKING/aggregate_gemma3_1b_transfer.py
 ```
 
 ## TPU Setup
@@ -268,10 +268,10 @@ gcloud compute tpus tpu-vm ssh tunix-pack1b-32 \
   --worker=0 \
   --command 'cd /tmp/packing-transfer && tar -czf /tmp/gemma3_1b_transfer32_tp4_results.tar.gz gemma3-1b-transfer32-tp4'
 
-mkdir -p 02-PACKING/data/transfer_1b_e2b/raw
+mkdir -p 02-PACKING/data/transfer_1b/raw
 gcloud compute tpus tpu-vm scp \
   tunix-pack1b-32:/tmp/gemma3_1b_transfer32_tp4_results.tar.gz \
-  02-PACKING/data/transfer_1b_e2b/raw/ \
+  02-PACKING/data/transfer_1b/raw/ \
   --project=gcp-ml-172005 \
   --zone=us-west4-a \
   --worker=0
@@ -281,52 +281,8 @@ Then regenerate locally. The aggregator extracts the tarball if the expanded
 raw directory is absent:
 
 ```bash
-python3 02-PACKING/aggregate_transfer_1b_e2b.py
+python3 02-PACKING/aggregate_gemma3_1b_transfer.py
 ```
-
-## Gemma4 E2B Boundary Smoke
-
-Gemma4 E2B was tested only to determine whether the same b8/L2048 transfer
-matrix could be run on the same `v5litepod-32` class. It could not under the
-current runner: both `fsdp=8,tp=4` and `fsdp=4,tp=8` hit the same all-gather
-HBM allocation before packing could become the relevant variable.
-
-```bash
-gcloud compute tpus tpu-vm create tunix-pack-e2b-32 \
-  --project=gcp-ml-172005 \
-  --zone=us-west4-a \
-  --accelerator-type=v5litepod-32 \
-  --version=v2-alpha-tpuv5-lite
-
-for mesh in "8 4" "4 8"; do
-  set -- ${mesh}
-  gcloud compute tpus tpu-vm ssh tunix-pack-e2b-32 \
-    --project=gcp-ml-172005 \
-    --zone=us-west4-a \
-    --worker=all \
-    --command "cd ~/TUNIX-TRY && \
-      SKIP_INSTALL=1 \
-      MODEL_ID=google/gemma-4-E2B \
-      MODEL_SOURCE=huggingface \
-      TOKENIZER_SOURCE=huggingface \
-      TPU_TYPE=v5litepod-32 \
-      CHIPS=32 \
-      MESH_FSDP=$1 \
-      MESH_TP=$2 \
-      INITIALIZE_DISTRIBUTED=1 \
-      DATASET_MODE=opus100 \
-      LONG_EXAMPLE_POLICY=truncate \
-      BATCH_SIZES=8 \
-      CONTEXTS=2048 \
-      NUM_EXAMPLES=5000 \
-      MAX_STEPS=50 \
-      OUT_BASE=/tmp/packing-transfer/gemma4-e2b-boundary-fsdp$1-tp$2 \
-      bash 02-PACKING/remote_gemma3_270m_packing_worker.sh short-throughput"
-done
-```
-
-An authenticated Hugging Face token is required for the Gemma4 checkpoint.
-`MODEL_SOURCE=hf` and `TOKENIZER_SOURCE=hf` are accepted aliases by the wrapper.
 
 ## Collect Artifacts
 
@@ -392,8 +348,4 @@ gcloud compute tpus tpu-vm delete tunix-pack1b-32 \
   --zone=us-west4-a \
   --quiet
 
-gcloud compute tpus tpu-vm delete tunix-pack-e2b-32 \
-  --project=gcp-ml-172005 \
-  --zone=us-west4-a \
-  --quiet
 ```

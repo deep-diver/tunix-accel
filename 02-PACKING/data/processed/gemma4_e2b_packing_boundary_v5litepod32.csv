@@ -1,3 +1,0 @@
-model_label,dataset_slug,dataset_label,batch_size,max_length,variant,tpu,chips,mesh,status,failure_detail
-Gemma4 E2B,opus100,OPUS EN-FR,8,2048,unpacked,v5litepod-32,32,"fsdp=8,tp=4",resource_exhausted,"all-gather allocation 37,580,963,840 bytes exceeds 17,179,869,184-byte per-chip HBM"
-Gemma4 E2B,opus100,OPUS EN-FR,8,2048,unpacked,v5litepod-32,32,"fsdp=4,tp=8",resource_exhausted,same all-gather allocation observed under TP=8; current Gemma4 E2B runner did not shard that buffer further
