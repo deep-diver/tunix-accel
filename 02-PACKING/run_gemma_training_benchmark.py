@@ -867,10 +867,18 @@ def create_gemma4_hf_model(mesh, args: argparse.Namespace):
           "Gemma4 HF safetensors snapshot is missing and --allow-download was "
           "not set: " + str(model_dir_path)
       )
-    model_dir = automodel.download_model(
-        args.model_id,
-        args.model_download_path,
-        automodel.ModelSource.HUGGINGFACE,
+    from huggingface_hub import snapshot_download  # pylint: disable=import-outside-toplevel
+
+    hf_token = (
+        os.environ.get("HF_TOKEN")
+        or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        or os.environ.get("HUGGINGFACE_TOKEN")
+        or True
+    )
+    model_dir = snapshot_download(
+        repo_id=args.model_id,
+        local_dir=str(model_dir_path),
+        token=hf_token,
     )
     model_dir_path = Path(model_dir)
 
