@@ -11,6 +11,7 @@ resources:
   disk: 100GB
 
 image: nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+working_dir: /workflow
 
 env:
   - HF_TOKEN
