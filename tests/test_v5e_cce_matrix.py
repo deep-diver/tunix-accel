@@ -26,6 +26,7 @@ def args(**overrides):
       "model_id": None,
       "model_source": None,
       "model_path": None,
+      "model_download_path": "",
       "tokenizer_source": None,
       "tokenizer_path": None,
       "allow_download": False,
@@ -44,13 +45,23 @@ def args(**overrides):
       "lora_rank": 16,
       "lora_alpha": 32.0,
       "max_inflight": 1,
+      "log_every": 1,
       "seed": 0,
       "run_id": "test-run",
       "tpu_type": "v5litepod-4",
       "chips": 4,
+      "initialize_distributed": False,
       "enable_profiler": False,
+      "disable_xla_dump": False,
+      "full_hlo_dump": False,
+      "keep_all_xla": False,
       "outdir": Path("/tmp/v5e-cce-test"),
       "profiler_dir": Path("/tmp/v5e-cce-test/profiler"),
+      "training_runner": Path("/tmp/train.py"),
+      "manifest_path": None,
+      "results_path": None,
+      "dry_run": True,
+      "force": False,
       "shard_index": 0,
       "num_shards": 1,
       "experiment_id": [],
@@ -108,3 +119,14 @@ def test_sharding_uses_experiment_id_modulo():
 def test_parse_explicit_meshes():
   runner = load_runner()
   assert runner.parse_meshes("fsdp=4,tp=1; fsdp=2,tp=2") == [(4, 1), (2, 2)]
+
+
+def test_huggingface_model_gets_download_path_without_empty_model_path():
+  runner = load_runner()
+  parsed_args = args(preset="profiler", model_size="qwen3_0p6b")
+  cases = runner.build_matrix(parsed_args)
+  command = runner.command_for_case(parsed_args, cases[0])
+  assert "--model-download-path" in command
+  assert any("Qwen_Qwen3-0.6B" in part for part in command)
+  assert "--model-path" not in command
+  assert "--tokenizer-path" not in command

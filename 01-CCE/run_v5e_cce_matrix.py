@@ -308,6 +308,7 @@ def model_args(args: argparse.Namespace) -> dict[str, Any]:
   preset["model_path"] = (
       args.model_path if args.model_path is not None else preset["model_path"]
   )
+  preset["model_download_path"] = args.model_download_path or ""
   preset["tokenizer_source"] = args.tokenizer_source or preset["tokenizer_source"]
   preset["tokenizer_path"] = (
       args.tokenizer_path
@@ -316,6 +317,11 @@ def model_args(args: argparse.Namespace) -> dict[str, Any]:
   )
   preset["allow_download"] = bool(args.allow_download or preset["allow_download"])
   preset["vocab_size"] = args.vocab_size or preset["vocab_size"]
+  if preset["model_source"] == "huggingface" and not preset["model_download_path"]:
+    cache_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", preset["model_id"]).strip("_")
+    preset["model_download_path"] = str(
+        (args.outdir / "model_cache" / cache_name).resolve()
+    )
   return preset
 
 
@@ -387,6 +393,7 @@ def base_case(
       "model_id": model["model_id"],
       "model_source": model["model_source"],
       "model_path": model["model_path"],
+      "model_download_path": model["model_download_path"],
       "tokenizer_source": model["tokenizer_source"],
       "tokenizer_path": model["tokenizer_path"],
       "allow_download": bool(model["allow_download"]),
@@ -617,12 +624,8 @@ def command_for_case(args: argparse.Namespace, case: dict[str, Any]) -> list[str
       case["model_id"],
       "--model-source",
       case["model_source"],
-      "--model-path",
-      case["model_path"],
       "--tokenizer-source",
       case["tokenizer_source"],
-      "--tokenizer-path",
-      case["tokenizer_path"],
       "--dataset-mode",
       case["dataset_mode"],
       "--num-examples",
@@ -655,12 +658,16 @@ def command_for_case(args: argparse.Namespace, case: dict[str, Any]) -> list[str
       case["run_dir"],
       "--skip-quality-eval",
   ]
+  if case.get("model_path"):
+    command.extend(["--model-path", str(case["model_path"])])
+  if case.get("model_download_path"):
+    command.extend(["--model-download-path", str(case["model_download_path"])])
+  if case.get("tokenizer_path"):
+    command.extend(["--tokenizer-path", str(case["tokenizer_path"])])
   if case["cce_enabled"]:
     command.append("--allow-autopatch")
   if args.initialize_distributed:
     command.append("--initialize-distributed")
-  if args.model_download_path:
-    command.extend(["--model-download-path", args.model_download_path])
   if case["model_source"] == "huggingface" and case.get("allow_download", False):
     command.append("--allow-download")
   if case["profiler_enabled"]:
