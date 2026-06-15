@@ -13,6 +13,19 @@ larger-model transfer checks are considered.
 - `run_gemma3_270m_cce_sweep.py`: local/TPU sweep runner used by the rerun.
 - `run_gemma_training_benchmark.py`: CCE/default Tunix training runner invoked
   by the sweep runner.
+- `run_v5e_cce_matrix.py`: structured TPU v5e-only CCE mesh/chunk experiment
+  runner with dry-run manifest generation, sharding, and optional profiler
+  cases.
+- `merge_v5e_cce_results.py`: merge sharded JSONL outputs into combined JSONL
+  and CSV files.
+- `analyze_v5e_cce_results.py`: partial-results analysis for fastest configs,
+  CCE/default speedups, outliers, recovery cases, and hypothesis checks.
+- `run_mesh_pathology_matrix.py`: generalized TPU/GPU matrix for checking
+  whether the small-chunk slowdown appears outside CCE.
+- `run_mesh_pathology_microbench.py`: JAX synthetic chunk-loop/collective
+  microbenchmarks used by the generalized matrix.
+- `analyze_mesh_pathology_results.py`: partial-results analysis for generalized
+  hardware/workload bad-vs-good slowdown ratios.
 - `remote_gemma3_270m_cce_worker.sh`: TPU VM profile wrapper.
 - `collect_gemma3_270m_cce_results.py`: artifact collector and plot generator.
 - `collect_gemma3_270m_mesh_results.py`: four-chip mesh compatibility collector.
@@ -110,6 +123,173 @@ python3 01-CCE/collect_gemma_1b_e2b_cce_transfer_results.py
 python3 01-CCE/collect_gemma_4b_e4b_cce_transfer_results.py
 python3 01-CCE/collect_gemma3_12b_27b_cce_focused_results.py
 ```
+
+## TPU v5e CCE Failure Matrix
+
+The structured v5e runner is for the current CCE/FSDP/TP failure-mode
+experiment. It defaults to Gemma3 270M, `v5litepod-4`, synthetic data, 3 warmup
+steps, and 10 measured steps. GPU execution is intentionally not included yet,
+but result rows include a `backend` field so later GPU runners can share the
+schema.
+
+Generate the full core matrix without running it:
+
+```bash
+python3 01-CCE/run_v5e_cce_matrix.py \
+  --preset core \
+  --dry-run \
+  --outdir /tmp/v5e-cce-core
+```
+
+Run one experiment from the generated matrix:
+
+```bash
+python3 01-CCE/run_v5e_cce_matrix.py \
+  --preset core \
+  --experiment-id 1 \
+  --outdir /tmp/v5e-cce-core
+```
+
+Run the core v5e matrix:
+
+```bash
+python3 01-CCE/run_v5e_cce_matrix.py \
+  --preset core \
+  --outdir /tmp/v5e-cce-core
+```
+
+The core preset covers `fsdp=4,tp=1`, `fsdp=2,tp=2`, and `fsdp=1,tp=4` over
+`b16/L512`, `b16/L1024`, and `b32/L512`, with Default CE plus CCE chunks
+`128/8192`, `128/32768`, `256/32768`, `512/32768`, and `512/65536`.
+
+Run the bad-row reproduction preset:
+
+```bash
+python3 01-CCE/run_v5e_cce_matrix.py \
+  --preset bad-row \
+  --outdir /tmp/v5e-cce-bad-row
+```
+
+This preset repeats CCE runs three times for `fsdp=2,tp=2`, `b16/L512` and
+`b16/L1024`, with chunks `128/8192`, `256/32768`, and `512/65536`.
+
+Run only the selected profiler cases:
+
+```bash
+python3 01-CCE/run_v5e_cce_matrix.py \
+  --preset profiler \
+  --enable-profiler \
+  --keep-all-xla \
+  --full-hlo-dump \
+  --outdir /tmp/v5e-cce-profiler
+```
+
+Profiler traces are written under `/tmp/v5e-cce-profiler/profiler/<case_name>/`,
+and each result row records `profiler_path`. `--keep-all-xla --full-hlo-dump`
+keeps optimized HLO, StableHLO/compiler IR, and XLA memory reports for
+post-run root-cause analysis. If `--enable-profiler` is used with the core
+preset, only the four selected profiler signatures are traced.
+
+Generate the profiler/HLO root-cause report from those four cases:
+
+```bash
+python3 01-CCE/analyze_v5e_cce_profiler_hlo.py \
+  --results-jsonl /tmp/v5e-cce-profiler/results/shard_0.jsonl \
+  --run-root /tmp/v5e-cce-profiler/runs \
+  --trace-root /tmp/v5e-cce-profiler/profiler \
+  --outdir 01-CCE/data/v5e_cce_profiler_hlo \
+  --report-path 01-CCE/profiler_hlo_analysis.md \
+  --plot-path 01-CCE/assets/v5e_cce_profiler_hlo_root_cause.png
+```
+
+The script writes a markdown report, a compact root-cause PNG, per-case metric
+CSV, extracted CCE inner-loop shape CSV, and non-fatal extraction notes. Missing
+trace/HLO files are logged rather than treated as fatal.
+
+Shard the core matrix across four v5e instances:
+
+```bash
+python3 01-CCE/run_v5e_cce_matrix.py --preset core \
+  --num-shards 4 --shard-index 0 --outdir /tmp/v5e-cce-core
+python3 01-CCE/run_v5e_cce_matrix.py --preset core \
+  --num-shards 4 --shard-index 1 --outdir /tmp/v5e-cce-core
+python3 01-CCE/run_v5e_cce_matrix.py --preset core \
+  --num-shards 4 --shard-index 2 --outdir /tmp/v5e-cce-core
+python3 01-CCE/run_v5e_cce_matrix.py --preset core \
+  --num-shards 4 --shard-index 3 --outdir /tmp/v5e-cce-core
+```
+
+Each shard writes one JSONL result file, for example
+`/tmp/v5e-cce-core/results/shard_0.jsonl`. Failed experiments are recorded as
+rows with `status=failure` and an `error_message`.
+
+Merge shard outputs:
+
+```bash
+python3 01-CCE/merge_v5e_cce_results.py \
+  --results-dir /tmp/v5e-cce-core/results
+```
+
+The merge script writes:
+
+```text
+/tmp/v5e-cce-core/results/all_results.jsonl
+/tmp/v5e-cce-core/results/all_results.csv
+```
+
+Run the analysis on complete or partial results:
+
+```bash
+python3 01-CCE/analyze_v5e_cce_results.py \
+  --results-dir /tmp/v5e-cce-core/results \
+  --outdir /tmp/v5e-cce-core/analysis
+```
+
+The analysis produces fastest-configuration, CCE-vs-Default, outlier, recovery,
+and hypothesis-check tables, plus plots for step time vs CCE loop count, step
+time vs chunk configuration grouped by mesh, and memory saving vs shape.
+
+## General Mesh/Chunk Pathology Matrix
+
+The generalized matrix asks whether the small-chunk slowdown appears outside
+Cut Cross Entropy and outside TPU v5e. The default pilot has 16 scenario groups:
+four workload families times four hardware targets. Each group expands across
+the four target signatures from the profiler/HLO study, so the concrete manifest
+has 64 experiment rows.
+
+Generate the manifest and dstack GPU launch commands:
+
+```bash
+python3 01-CCE/run_mesh_pathology_matrix.py \
+  --dry-run \
+  --write-dstack-commands \
+  --outdir /tmp/mesh-pathology-pilot
+```
+
+Run the primary GPU target after inspecting offers:
+
+```bash
+uvx --from dstack dstack offer --gpu A100:4:80GB --max-offers 5
+
+uvx --from dstack dstack apply \
+  -f 01-CCE/dstack_mesh_pathology_gpu.yml \
+  --gpu A100:4:80GB \
+  -n mesh-pathology-gpu-a100-80gb-4 \
+  -- \
+  --hardware-targets gpu-a100-80gb-4 \
+  --outdir /tmp/mesh-pathology-gpu-a100-80gb-4
+```
+
+Analyze complete or partial generalized results:
+
+```bash
+python3 01-CCE/analyze_mesh_pathology_results.py \
+  --results-dir /tmp/mesh-pathology-gpu-a100-80gb-4/results \
+  --outdir /tmp/mesh-pathology-gpu-a100-80gb-4/analysis
+```
+
+See `MESH_PATHOLOGY_EXPERIMENT_PLAN.md` for the workload definitions, hardware
+target rationale, and the latest dstack offer snapshot used for planning.
 
 ## Gemma3 1B / Gemma4 E2B Transfer Package
 

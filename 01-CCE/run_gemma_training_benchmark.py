@@ -1018,7 +1018,17 @@ def run_variant(
           cycled_batches(prepared, max_steps=args.max_steps),
           local_step_times,
       )
-      trainer.train(train_iter, eval_ds=None, skip_jit=args.skip_jit)
+      profiler_started = False
+      try:
+        if args.profiler_dir:
+          profiler_dir = Path(args.profiler_dir).expanduser().resolve()
+          profiler_dir.mkdir(parents=True, exist_ok=True)
+          jax.profiler.start_trace(str(profiler_dir))
+          profiler_started = True
+        trainer.train(train_iter, eval_ds=None, skip_jit=args.skip_jit)
+      finally:
+        if profiler_started:
+          jax.profiler.stop_trace()
       memory_after_train = device_memory_snapshot(jax)
       quality: dict[str, Any] = {}
       generation_rows: list[dict[str, str]] = []
@@ -1187,6 +1197,9 @@ def run_variant(
           "google_tunix_version": package_version("google-tunix"),
           "tunix_accel_version": package_version("tunix-accel"),
       },
+      "profiler_dir": str(Path(args.profiler_dir).expanduser().resolve())
+      if args.profiler_dir
+      else "",
       "accel": collect_accel_status(),
       "packing": prepared.packing_summary,
       "quality": quality,
@@ -1430,6 +1443,14 @@ def main() -> None:
   parser.add_argument("--mesh-fsdp", type=int, default=0)
   parser.add_argument("--mesh-tp", type=int, default=0)
   parser.add_argument("--max-inflight", type=int, default=1)
+  parser.add_argument(
+      "--profiler-dir",
+      default="",
+      help=(
+          "Optional directory for a JAX profiler trace. Intended for a small "
+          "number of selected TPU cases, not full experiment grids."
+      ),
+  )
   parser.add_argument("--skip-jit", action="store_true")
   parser.add_argument("--prepare-only", action="store_true")
   parser.add_argument("--skip-quality-eval", action="store_true")

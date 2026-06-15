@@ -1,0 +1,26 @@
+type: task
+name: mesh-pathology-gpu
+
+# The concrete GPU type is supplied by `dstack apply --gpu ...`.
+# Examples:
+#   --gpu A100:4:80GB
+#   --gpu L40S:4:48GB
+#   --gpu H100:4:80GB
+resources:
+  gpu: A100:4:80GB
+  disk: 200GB
+
+image: nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+
+env:
+  - HF_TOKEN
+
+commands:
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y git python3.11 python3.11-venv python3-pip
+  - python3.11 -m venv .venv
+  - . .venv/bin/activate && python -m pip install -U pip wheel setuptools
+  - . .venv/bin/activate && python -m pip install -e .
+  - . .venv/bin/activate && python -m pip install "jax[cuda12]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html pandas matplotlib
+  - . .venv/bin/activate && python -c "import jax; print('jax', jax.__version__, 'backend', jax.default_backend(), 'devices', jax.devices())"
+  - . .venv/bin/activate && python 01-CCE/run_mesh_pathology_matrix.py ${{ run.args }} --force

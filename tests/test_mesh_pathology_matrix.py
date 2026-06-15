@@ -1,0 +1,90 @@
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+from types import SimpleNamespace
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+RUNNER_PATH = REPO_ROOT / "01-CCE" / "run_mesh_pathology_matrix.py"
+
+
+def load_runner():
+  spec = importlib.util.spec_from_file_location("run_mesh_pathology_matrix", RUNNER_PATH)
+  assert spec is not None
+  module = importlib.util.module_from_spec(spec)
+  assert spec.loader is not None
+  spec.loader.exec_module(module)
+  return module
+
+
+def args(**overrides):
+  defaults = {
+      "preset": "pilot",
+      "hardware_targets": None,
+      "workloads": None,
+      "repeats": 1,
+      "hidden_size": 320,
+      "vocab_size": 262144,
+      "warmup_steps": 3,
+      "measured_steps": 10,
+      "seed": 0,
+      "enable_profiler": False,
+      "disable_xla_dump": False,
+      "full_hlo_dump": False,
+      "keep_all_xla": False,
+      "shard_index": 0,
+      "num_shards": 1,
+      "experiment_id": [],
+      "limit": None,
+      "run_id": "test-run",
+      "outdir": Path("/tmp/mesh-pathology-test"),
+      "manifest_path": Path("/tmp/mesh-pathology-test/manifest.jsonl"),
+      "results_path": Path("/tmp/mesh-pathology-test/results/shard_0.jsonl"),
+      "dry_run": True,
+      "write_dstack_commands": False,
+      "force": False,
+      "cce_model_size": "270m",
+      "cce_model_id": "",
+      "cce_model_source": None,
+      "cce_model_path": None,
+      "cce_tokenizer_source": None,
+      "cce_tokenizer_path": None,
+      "cce_allow_download": False,
+  }
+  defaults.update(overrides)
+  return SimpleNamespace(**defaults)
+
+
+def test_pilot_matrix_has_16_scenario_groups_and_64_rows():
+  runner = load_runner()
+  cases = runner.build_matrix(args())
+  groups = {(case["hardware_target"], case["workload_family"]) for case in cases}
+  assert len(groups) == 16
+  assert len(cases) == 64
+  assert {case["signature_label"] for case in cases} == {
+      "bad",
+      "good",
+      "control-fsdp4-tp1",
+      "control-fsdp1-tp4",
+  }
+
+
+def test_primary_gpu_target_is_a100_80gb_four_way():
+  runner = load_runner()
+  a100 = runner.HARDWARE_TARGETS["gpu-a100-80gb-4"]
+  assert a100["dstack_gpu_spec"] == "A100:4:80GB"
+  assert a100["device_count"] == 4
+  assert a100["role"] == "primary_gpu_baseline"
+
+
+def test_dstack_commands_are_generated_for_gpu_targets_only():
+  runner = load_runner()
+  cases = runner.build_matrix(args())
+  rows = runner.dstack_command_rows(cases, args())
+  assert {row["hardware_target"] for row in rows} == {
+      "gpu-a100-80gb-4",
+      "gpu-l40s-48gb-4",
+      "gpu-h100-80gb-4",
+  }
+  assert all("dstack apply" in row["apply_command"] for row in rows)
