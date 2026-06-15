@@ -21,7 +21,18 @@ commands:
   - DEBIAN_FRONTEND=noninteractive apt-get install -y git python3.11 python3.11-venv python3-pip
   - python3.11 -m venv .venv
   - . .venv/bin/activate && python -m pip install -U pip wheel setuptools
+  - . .venv/bin/activate && python -m pip install -r requirements.txt
   - . .venv/bin/activate && python -m pip install -e .
-  - . .venv/bin/activate && python -m pip install "jax[cuda12]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html pandas matplotlib
+  - . .venv/bin/activate && python -m pip install -U "jax[cuda12]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html pandas matplotlib
   - . .venv/bin/activate && python -c "import jax; print('jax', jax.__version__, 'backend', jax.default_backend(), 'devices', jax.devices())"
-  - . .venv/bin/activate && python 01-CCE/run_mesh_pathology_matrix.py ${{ run.args }} --force
+  - |
+    . .venv/bin/activate
+    python 01-CCE/run_mesh_pathology_matrix.py ${{ run.args }} --force
+    status=$?
+    echo "=== MESH_PATHOLOGY_RESULTS_JSONL_BEGIN ==="
+    find /tmp -path "*/mesh-pathology-*/results/*.jsonl" -type f -print -exec sed -n '1,200p' {} \; || true
+    echo "=== MESH_PATHOLOGY_RESULTS_JSONL_END ==="
+    echo "=== MESH_PATHOLOGY_CASE_LOG_TAILS_BEGIN ==="
+    find /tmp -path "*/mesh-pathology-*/runs/*/runner.log" -type f -print -exec tail -n 120 {} \; || true
+    echo "=== MESH_PATHOLOGY_CASE_LOG_TAILS_END ==="
+    exit "${status}"
