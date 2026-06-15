@@ -99,7 +99,9 @@ of that pattern, but the non-CCE synthetic A100 rows show the same direction.
 - Only the A100 GPU target has been run for the GPU side so far.
 - H100, L40S, and other GPU targets are configured but were not launched to avoid
   extra cost.
-- TPU v5e results exist separately in `01-CCE/data/v5e_cce_full_matrix`, but this
-  report focuses on the A100 pilot and retry.
+- TPU v5e synthetic microbench results now exist separately in
+  `01-CCE/data/mesh_pathology_tpu_v5e_combined`; this report focuses on the
+  A100 pilot and retry. See `MESH_PATHOLOGY_TPU_A100_COMPARISON_REPORT.md` for
+  the cross-hardware comparison.
 - The synthetic workloads are intentionally simplified and should be used as
   mechanism probes, not replacements for full model training.

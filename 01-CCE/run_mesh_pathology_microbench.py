@@ -37,7 +37,15 @@ WORKLOADS = {
     "projection_collective_loop",
 }
 
-MEM_TOTAL_RE = re.compile(r"Total bytes:\s+\d+\s+\(([\d.]+)GiB\)")
+MEM_TOTAL_RE = re.compile(
+    r"Total bytes(?: used)?:\s+(\d+)(?:\s+\(([\d.]+)([KMGT]iB)\))?"
+)
+UNIT_TO_GIB = {
+    "KiB": 1.0 / (1024**2),
+    "MiB": 1.0 / 1024,
+    "GiB": 1.0,
+    "TiB": 1024.0,
+}
 
 
 def utc_now() -> str:
@@ -76,7 +84,9 @@ def parse_xla_total_gib(xla_dir: Path | None) -> tuple[float | None, str]:
   text = report.read_text(errors="ignore")
   match = MEM_TOTAL_RE.search(text)
   if match:
-    return float(match.group(1)), str(report.resolve())
+    if match.group(2) and match.group(3):
+      return float(match.group(2)) * UNIT_TO_GIB[match.group(3)], str(report.resolve())
+    return int(match.group(1)) / (1024**3), str(report.resolve())
   return None, str(report.resolve())
 
 
