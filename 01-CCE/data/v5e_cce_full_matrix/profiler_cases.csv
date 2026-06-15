@@ -1,0 +1,5 @@
+experiment_id,mesh_configuration,shape,chunk_configuration,status,steady_state_mean_step_time_sec,xla_planned_hbm_gib_per_chip,profiler_path
+0,"fsdp=2,tp=2",b16/L512,128/8192,success,15.36336282409984,2.65,/tmp/v5e-cce-full/profiler/profiler/exp0000_fsdp2_tp2_b16_l512_tc128_vc8192_r0
+1,"fsdp=2,tp=2",b16/L512,512/65536,success,0.8224221964997923,2.65,/tmp/v5e-cce-full/profiler/profiler/exp0001_fsdp2_tp2_b16_l512_tc512_vc65536_r0
+2,"fsdp=4,tp=1",b16/L512,128/8192,success,0.3823134623997248,3.85,/tmp/v5e-cce-full/profiler/profiler/exp0002_fsdp4_tp1_b16_l512_tc128_vc8192_r0
+3,"fsdp=1,tp=4",b16/L512,128/8192,success,1.9649322818000656,1.64,/tmp/v5e-cce-full/profiler/profiler/exp0003_fsdp1_tp4_b16_l512_tc128_vc8192_r0

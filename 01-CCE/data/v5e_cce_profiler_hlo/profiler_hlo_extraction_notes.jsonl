@@ -1,0 +1,4 @@
+{"case_label": "bad", "case_name": "exp0000_fsdp2_tp2_b16_l512_tc128_vc8192_r0", "notes": "trace parsed, but explicit idle/utilization events were not extracted"}
+{"case_label": "good", "case_name": "exp0001_fsdp2_tp2_b16_l512_tc512_vc65536_r0", "notes": "trace parsed, but explicit idle/utilization events were not extracted"}
+{"case_label": "control-fsdp4-tp1", "case_name": "exp0002_fsdp4_tp1_b16_l512_tc128_vc8192_r0", "notes": "trace parsed, but explicit idle/utilization events were not extracted"}
+{"case_label": "control-fsdp1-tp4", "case_name": "exp0003_fsdp1_tp4_b16_l512_tc128_vc8192_r0", "notes": "trace parsed, but explicit idle/utilization events were not extracted"}
