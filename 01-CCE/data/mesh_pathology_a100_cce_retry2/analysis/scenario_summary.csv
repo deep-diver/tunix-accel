@@ -1,0 +1,2 @@
+hardware_target,workload_family,rows,successes,median_step_time_sec,median_compile_time_sec,median_hbm_gib,scenario_group
+gpu-a100-80gb-4,cce_train,4,4,0.7254805157999953,46.02298382525001,19.14,gpu-a100-80gb-4/cce_train

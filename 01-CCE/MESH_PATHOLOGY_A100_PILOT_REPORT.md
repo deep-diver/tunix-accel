@@ -1,71 +1,105 @@
 # A100 Mesh/Chunk Pathology Pilot Report
 
-Date: 2026-06-16 01:17:12 KST
+Date: 2026-06-16 KST
 
-This pilot ran the generalized mesh/chunk pathology matrix on one dstack GPU target: `gpu-a100-80gb-4`.
-The concrete machine was a GCP spot `a2-ultragpu-4g` with 4x A100 80GB GPUs. The run name was `mesh-pathology-gpu-a100-80gb-4-spot2`.
+This pilot ran the generalized mesh/chunk pathology matrix on one dstack GPU target:
+`gpu-a100-80gb-4`. The concrete machine was a GCP spot `a2-ultragpu-4g`
+with 4x A100 80GB GPUs.
 
-Cleanup status: the dstack fleet list was empty after cleanup, and `dstack ps` only showed the exited run record. No active fleet or GPU instance remained at cleanup verification time.
+Cleanup status: after the successful CCE retry, the dstack fleet
+`mesh-pathology-a100-fleet-retry` was deleted. A subsequent `dstack fleet list -v`
+showed no fleets, and `dstack ps` only showed the exited run record. No active
+GPU instance remained at cleanup verification time.
+
+## What Ran
+
+The initial A100 pilot run completed the non-CCE synthetic workloads and recorded
+the CCE rows as failures. The CCE failures were retried after fixing the GPU job
+environment and the Hugging Face model download path. The final A100 result set
+contains 16 successful rows:
+
+- 4 CCE training rows from `mesh-pathology-gpu-a100-cce-retry2`
+- 12 non-CCE synthetic rows from the original A100 pilot
 
 ## Artifacts
 
-- Console log: `01-CCE/data/mesh_pathology_a100_dstack/dstack_run.log`
-- Reconstructed JSONL: `01-CCE/data/mesh_pathology_a100_dstack/reconstructed_results.jsonl`
-- Reconstructed CSV: `01-CCE/data/mesh_pathology_a100_dstack/reconstructed_results.csv`
-- Analysis directory: `01-CCE/data/mesh_pathology_a100_dstack/analysis`
-- Plot: `01-CCE/data/mesh_pathology_a100_dstack/analysis/bad_good_slowdown_by_hardware_workload.png`
+- Initial A100 console log: `01-CCE/data/mesh_pathology_a100_dstack/dstack_run.log`
+- CCE retry2 console log: `01-CCE/data/mesh_pathology_a100_cce_retry2/dstack_run.log`
+- CCE retry2 JSONL: `01-CCE/data/mesh_pathology_a100_cce_retry2/results.jsonl`
+- CCE retry2 CSV: `01-CCE/data/mesh_pathology_a100_cce_retry2/results.csv`
+- CCE retry2 summary: `01-CCE/data/mesh_pathology_a100_cce_retry2/summary.md`
+- Combined 16-row JSONL: `01-CCE/data/mesh_pathology_a100_combined/results.jsonl`
+- Combined 16-row CSV: `01-CCE/data/mesh_pathology_a100_combined/results.csv`
+- Combined analysis: `01-CCE/data/mesh_pathology_a100_combined/analysis`
+- Combined plot: `01-CCE/data/mesh_pathology_a100_combined/analysis/bad_good_slowdown_by_hardware_workload.png`
 
-![A100 bad/good slowdown](data/mesh_pathology_a100_dstack/analysis/bad_good_slowdown_by_hardware_workload.png)
+![A100 bad/good slowdown](data/mesh_pathology_a100_combined/analysis/bad_good_slowdown_by_hardware_workload.png)
 
 ## Run Summary
 
-| workload | rows | successes | median step time sec |
-|---|---:|---:|---:|
-| cce_train | 4 | 0 |  |
-| chunked_matmul_loop | 4 | 4 | 0.051703 |
-| collective_loop | 4 | 4 | 0.083758 |
-| projection_collective_loop | 4 | 4 | 0.112938 |
+| workload | rows | successes | median step time sec | median compile sec | median planned HBM GiB/chip |
+|---|---:|---:|---:|---:|---:|
+| cce_train | 4 | 4 | 0.725481 | 46.023 | 19.14 |
+| chunked_matmul_loop | 4 | 4 | 0.051703 |  |  |
+| collective_loop | 4 | 4 | 0.083758 |  |  |
+| projection_collective_loop | 4 | 4 | 0.112938 |  |  |
 
-The 12 synthetic JAX microbench rows completed. The 4 `cce_train` rows failed and were recorded as failure rows. The remote per-case artifacts could not be retrieved because SSH artifact access was denied, so the exact CCE traceback is not available in this local artifact set.
+The 12 synthetic rows completed in the initial A100 pilot. The 4 CCE rows
+completed in the second retry after the model path fix.
+
+## CCE Retry Results
+
+| case | mesh | chunks | step time sec | compile sec | planned HBM GiB/chip | runtime HBM GB | tokens/sec | CCE loops |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| bad | fsdp=2,tp=2 | 128/8192 | 4.278102 | 46.532 | 18.96 | 81.44 | 487.5 | 76 |
+| good | fsdp=2,tp=2 | 512/65536 | 0.635943 | 45.513 | 19.32 | 83.02 | 3279.5 | 3 |
+| control-fsdp4-tp1 | fsdp=4,tp=1 | 128/8192 | 0.815018 | 46.655 | 34.47 | 148.10 | 2559.0 | 76 |
+| control-fsdp1-tp4 | fsdp=1,tp=4 | 128/8192 | 0.617338 | 39.452 | 10.10 | 44.05 | 3378.4 | 76 |
+
+The A100 CCE bad row is 6.73x slower than the good row. Compile time is nearly
+unchanged, and planned HBM is slightly lower in the bad row. This makes the
+small-chunk CCE failure look like a steady-state throughput issue, not a
+compile-time-only or memory-capacity-only issue.
 
 ## Bad vs Good Comparison
 
 Bad means `fsdp=2,tp=2,b16/L512,token_chunk=128,vocab_chunk=8192`.
 Good means `fsdp=2,tp=2,b16/L512,token_chunk=512,vocab_chunk=65536`.
 
-| workload | bad step sec | good step sec | bad/good | bad/good loop counts |
+| workload | bad step sec | good step sec | bad/good | loop count ratio |
 |---|---:|---:|---:|---:|
-| projection_collective_loop | 0.174196 | 0.045364 | 3.84x | 2048 / 64 |
-| collective_loop | 0.131361 | 0.036154 | 3.63x | 2048 / 64 |
-| chunked_matmul_loop | 0.052492 | 0.019535 | 2.69x | 2048 / 64 |
+| cce_train | 4.278102 | 0.635943 | 6.73x | 32.0x generalized, 25.3x CCE |
+| projection_collective_loop | 0.174196 | 0.045364 | 3.84x | 32.0x |
+| collective_loop | 0.131361 | 0.036154 | 3.63x | 32.0x |
+| chunked_matmul_loop | 0.052492 | 0.019535 | 2.69x | 32.0x |
 
-The bad row has 2048 loop iterations in this generalized microbench schema, versus 64 for the good row, a 32x loop-count ratio.
+The generalized synthetic loop schema uses 2048 iterations for the bad row and
+64 for the good row. CCE itself reports 76 loops for the bad row and 3 loops for
+the good row because it computes `ceil(sequence_length / token_chunk) *
+ceil(vocab_size / vocab_chunk)` for the Qwen vocabulary.
 
 ## Interpretation
 
-The slowdown reproduced on A100 outside the CCE training path:
+The A100 results support the broader hypothesis that the pathology is not
+CCE-specific:
 
-- `chunked_matmul_loop`: 2.69x slower for the small-chunk bad row.
-- `collective_loop`: 3.63x slower for the small-chunk bad row.
-- `projection_collective_loop`: 3.84x slower for the small-chunk bad row.
+- Small repeated chunked matmul loops are already slower on A100.
+- Adding collective-heavy communication increases the bad/good gap.
+- CCE shows the largest A100 gap in this pilot.
+- In the CCE retry, planned HBM does not explain the slowdown.
+- The failure appears in steady-state step time, not only in compile time.
 
-This is evidence that the pathology is not CCE-specific. On A100, repeated small chunk loops alone are already slow, and adding collectives increases the bad/good gap. The current pilot supports the broader hypothesis that throughput failure is governed by chunk-loop granularity interacting with communication/layout, while CCE is one important instance of that pattern.
+The most likely current explanation is that small chunk granularity creates many
+short loop bodies or kernels, and the cost becomes much worse when the workload
+also interacts with mesh layout and communication. CCE is one important instance
+of that pattern, but the non-CCE synthetic A100 rows show the same direction.
 
-## Failed Rows
+## Remaining Limits
 
-| experiment id | workload | signature | chunks | failure type |
-|---:|---|---|---|---|
-| 0 | cce_train | bad | 128/8192 | unavailable_remote_case_artifact |
-| 1 | cce_train | good | 512/65536 | unavailable_remote_case_artifact |
-| 2 | cce_train | control-fsdp4-tp1 | 128/8192 | unavailable_remote_case_artifact |
-| 3 | cce_train | control-fsdp1-tp4 | 128/8192 | unavailable_remote_case_artifact |
-
-## Limitations
-
-- Only A100 GPU was run in this pilot; TPU v5e and other GPU types remain in the matrix but were not rerun here.
-- CCE GPU rows failed before useful timing data was recovered locally.
-- Compile time, HBM, profiler traces, and HLO extraction are not available from this A100 run because the dstack job only exposed console logs locally.
-
-## Next Step
-
-Fix the GPU dstack environment for `cce_train` by installing the full project requirements before `pip install -e .`, then rerun only the four A100 `cce_train` rows. The synthetic rows already provide a useful non-CCE baseline and do not need to be repeated immediately.
+- Only the A100 GPU target has been run for the GPU side so far.
+- H100, L40S, and other GPU targets are configured but were not launched to avoid
+  extra cost.
+- TPU v5e results exist separately in `01-CCE/data/v5e_cce_full_matrix`, but this
+  report focuses on the A100 pilot and retry.
+- The synthetic workloads are intentionally simplified and should be used as
+  mechanism probes, not replacements for full model training.

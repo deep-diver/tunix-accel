@@ -1,0 +1,2 @@
+hardware_target,workload_family,bad_step_time_sec,bad_compile_time_sec,bad_hbm_gib,bad_chunk_loop_count,good_step_time_sec,good_compile_time_sec,good_hbm_gib,good_chunk_loop_count,bad_good_step_time_ratio,bad_good_compile_time_ratio,bad_good_hbm_ratio,loop_count_ratio
+gpu-a100-80gb-4,cce_train,4.278101753399983,46.532476171500036,18.96,2048.0,0.6359425583000075,45.51349147899998,19.32,64.0,6.727182663849614,1.0223886293797129,0.9813664596273293,32.0
