@@ -27,12 +27,18 @@ The final cross-hardware comparison now has 32 successful rows:
 
 ## Per-Accelerator Operation Comparisons
 
-The useful comparison is within one accelerator at a time: for each workload,
-how much slower is the small-chunk bad row than the large-chunk good row?
+The useful comparison is within one accelerator at a time. Each row is one of
+the four workload categories, and each column is one experimental variable
+setting. The heatmap normalizes each workload category to its `good` row, while
+the bar plots show absolute step time inside each category.
 
-![TPU v5e bad-good slowdown by workload](data/mesh_pathology_tpu_a100_combined/analysis/bad_good_ratio_by_workload_tpu_v5e.png)
+![TPU v5e normalized variable heatmap](data/mesh_pathology_tpu_a100_combined/analysis/normalized_step_time_by_workload_signature_tpu_v5e_4.png)
 
-![A100 bad-good slowdown by workload](data/mesh_pathology_tpu_a100_combined/analysis/bad_good_ratio_by_workload_a100.png)
+![TPU v5e step time by workload and variable](data/mesh_pathology_tpu_a100_combined/analysis/step_time_by_workload_signature_tpu_v5e_4.png)
+
+![A100 normalized variable heatmap](data/mesh_pathology_tpu_a100_combined/analysis/normalized_step_time_by_workload_signature_gpu_a100_80gb_4.png)
+
+![A100 step time by workload and variable](data/mesh_pathology_tpu_a100_combined/analysis/step_time_by_workload_signature_gpu_a100_80gb_4.png)
 
 ## Bad vs Good Ratios
 

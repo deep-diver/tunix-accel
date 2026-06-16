@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -12,12 +13,44 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import TwoSlopeNorm
 import pandas as pd
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_RESULTS_DIR = SCRIPT_DIR / "results" / "mesh-pathology-matrix" / "results"
 DEFAULT_OUTDIR = SCRIPT_DIR / "results" / "mesh-pathology-matrix" / "analysis"
+
+WORKLOAD_ORDER = [
+    "cce_train",
+    "chunked_matmul_loop",
+    "collective_loop",
+    "projection_collective_loop",
+]
+WORKLOAD_LABELS = {
+    "cce_train": "CCE train",
+    "chunked_matmul_loop": "Chunked matmul",
+    "collective_loop": "Collective only",
+    "projection_collective_loop": "Projection + collective",
+}
+SIGNATURE_ORDER = [
+    "bad",
+    "good",
+    "control-fsdp4-tp1",
+    "control-fsdp1-tp4",
+]
+SIGNATURE_LABELS = {
+    "bad": "fsdp2/tp2\n128/8192\nbad",
+    "good": "fsdp2/tp2\n512/65536\ngood",
+    "control-fsdp4-tp1": "fsdp4/tp1\n128/8192",
+    "control-fsdp1-tp4": "fsdp1/tp4\n128/8192",
+}
+SIGNATURE_COLORS = {
+    "bad": "#c94f4f",
+    "good": "#2f6f4e",
+    "control-fsdp4-tp1": "#669bbc",
+    "control-fsdp1-tp4": "#8d80ad",
+}
 
 
 def read_jsonl(path: Path) -> pd.DataFrame:
@@ -225,6 +258,155 @@ def plot_bad_good(bad_good: pd.DataFrame, path: Path) -> None:
   plt.close(fig)
 
 
+def safe_slug(value: str) -> str:
+  return "".join(char if char.isalnum() else "_" for char in value).strip("_")
+
+
+def format_step_time(value: float) -> str:
+  if value < 0.001:
+    return f"{value * 1_000_000:.0f}us"
+  if value < 1.0:
+    return f"{value * 1000:.1f}ms"
+  return f"{value:.2f}s"
+
+
+def successful_step_rows(rows: pd.DataFrame) -> pd.DataFrame:
+  if rows.empty:
+    return pd.DataFrame()
+  return rows[
+      rows["ok"]
+      & rows["steady_state_mean_step_time_sec"].notna()
+      & rows["workload_family"].isin(WORKLOAD_ORDER)
+      & rows["signature_label"].isin(SIGNATURE_ORDER)
+  ].copy()
+
+
+def plot_step_time_by_signature(rows: pd.DataFrame, hardware: str, outdir: Path) -> None:
+  part = successful_step_rows(rows)
+  part = part[part["hardware_target"].astype(str).eq(hardware)]
+  if part.empty:
+    return
+
+  fig, axes = plt.subplots(2, 2, figsize=(13, 8.4))
+  axes_flat = axes.flatten()
+  for ax, workload in zip(axes_flat, WORKLOAD_ORDER):
+    subset = part[part["workload_family"].eq(workload)]
+    values = []
+    labels = []
+    colors = []
+    for signature in SIGNATURE_ORDER:
+      row = subset[subset["signature_label"].eq(signature)]
+      if row.empty:
+        continue
+      values.append(float(row["steady_state_mean_step_time_sec"].iloc[0]))
+      labels.append(SIGNATURE_LABELS[signature])
+      colors.append(SIGNATURE_COLORS[signature])
+
+    if not values:
+      ax.axis("off")
+      continue
+    bars = ax.bar(range(len(values)), values, color=colors, width=0.66)
+    ymax = max(values) * 1.35 if values else 1.0
+    ax.set_ylim(0, ymax)
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, fontsize=8)
+    ax.set_title(WORKLOAD_LABELS[workload])
+    ax.set_ylabel("step time (s)")
+    ax.grid(axis="y", alpha=0.25)
+    for bar, value in zip(bars, values):
+      ax.text(
+          bar.get_x() + bar.get_width() / 2,
+          bar.get_height() + ymax * 0.03,
+          format_step_time(value),
+          ha="center",
+          va="bottom",
+          fontsize=8,
+      )
+
+  fig.suptitle(f"{hardware}: step time by workload and experiment variable", y=0.995)
+  fig.tight_layout()
+  fig.savefig(outdir / f"step_time_by_workload_signature_{safe_slug(hardware)}.png", dpi=170)
+  plt.close(fig)
+
+
+def plot_normalized_signature_heatmap(rows: pd.DataFrame, hardware: str, outdir: Path) -> None:
+  part = successful_step_rows(rows)
+  part = part[part["hardware_target"].astype(str).eq(hardware)]
+  if part.empty:
+    return
+
+  matrix: list[list[float]] = []
+  annotations: list[list[str]] = []
+  ylabels: list[str] = []
+  for workload in WORKLOAD_ORDER:
+    subset = part[part["workload_family"].eq(workload)]
+    good = subset[subset["signature_label"].eq("good")]
+    if good.empty:
+      continue
+    good_time = float(good["steady_state_mean_step_time_sec"].iloc[0])
+    if good_time <= 0:
+      continue
+    row_values = []
+    row_labels = []
+    for signature in SIGNATURE_ORDER:
+      match = subset[subset["signature_label"].eq(signature)]
+      if match.empty:
+        row_values.append(float("nan"))
+        row_labels.append("")
+        continue
+      ratio = float(match["steady_state_mean_step_time_sec"].iloc[0]) / good_time
+      row_values.append(ratio)
+      row_labels.append(f"{ratio:.2f}x")
+    matrix.append(row_values)
+    annotations.append(row_labels)
+    ylabels.append(WORKLOAD_LABELS[workload])
+
+  if not matrix:
+    return
+
+  log_matrix = pd.DataFrame(matrix).map(
+      lambda value: math.log2(value) if pd.notna(value) and value > 0 else float("nan")
+  )
+  finite = [
+      abs(float(value))
+      for row in log_matrix.to_numpy().tolist()
+      for value in row
+      if pd.notna(value)
+  ]
+  bound = max(finite) if finite else 1.0
+  bound = max(bound, 1.0)
+
+  fig, ax = plt.subplots(figsize=(9.6, 4.9))
+  image = ax.imshow(
+      log_matrix,
+      cmap="coolwarm",
+      norm=TwoSlopeNorm(vmin=-bound, vcenter=0.0, vmax=bound),
+      aspect="auto",
+  )
+  ax.set_xticks(range(len(SIGNATURE_ORDER)))
+  ax.set_xticklabels([SIGNATURE_LABELS[item] for item in SIGNATURE_ORDER], fontsize=8)
+  ax.set_yticks(range(len(ylabels)))
+  ax.set_yticklabels(ylabels)
+  ax.set_title(f"{hardware}: step time normalized to the good row")
+  for y, row in enumerate(annotations):
+    for x, label in enumerate(row):
+      if label:
+        ax.text(x, y, label, ha="center", va="center", fontsize=9)
+  cbar = fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
+  cbar.set_label("log2(step time / good)")
+  fig.tight_layout()
+  fig.savefig(outdir / f"normalized_step_time_by_workload_signature_{safe_slug(hardware)}.png", dpi=170)
+  plt.close(fig)
+
+
+def plot_variable_views(rows: pd.DataFrame, outdir: Path) -> None:
+  if rows.empty or "hardware_target" not in rows:
+    return
+  for hardware in sorted(rows["hardware_target"].dropna().astype(str).unique()):
+    plot_step_time_by_signature(rows, hardware, outdir)
+    plot_normalized_signature_heatmap(rows, hardware, outdir)
+
+
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser()
   parser.add_argument("--input", type=Path, action="append", default=[])
@@ -249,6 +431,7 @@ def main() -> None:
   write_frame(bad_good, outdir / "bad_good_ratios.csv")
   (outdir / "hypothesis_report.md").write_text(build_hypothesis(rows, bad_good))
   plot_bad_good(bad_good, outdir / "bad_good_slowdown_by_hardware_workload.png")
+  plot_variable_views(rows, outdir)
 
   print(f"inputs={len(inputs)}")
   print(f"rows={len(rows)}")
