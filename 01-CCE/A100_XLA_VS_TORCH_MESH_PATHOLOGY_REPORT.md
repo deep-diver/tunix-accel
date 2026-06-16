@@ -44,7 +44,15 @@ PyTorch eager reproduces the small-chunk slowdown without XLA.
 
 ![A100 normalized signature heatmap](data/mesh_pathology_a100_xla_vs_torch/analysis/a100_normalized_signature_heatmap_xla_vs_torch.png)
 
-Experimental layered view:
+Scatter views:
+
+![A100 scatter chunk loop vs relative time](data/mesh_pathology_a100_xla_vs_torch/analysis/a100_scatter_chunk_loop_vs_relative_time.png)
+
+![A100 scatter chunk loop vs step time](data/mesh_pathology_a100_xla_vs_torch/analysis/a100_scatter_chunk_loop_vs_step_time.png)
+
+Experimental layered view. Gray `fail` cells were attempted but did not produce
+timings; gray `n/a` cells were not started after the run was aborted to avoid
+leaving the paid instance running.
 
 ![A100 layered 3D heatmap](data/mesh_pathology_a100_xla_vs_torch/analysis/a100_layered_3d_heatmap_xla_vs_torch.png)
 

@@ -33,6 +33,18 @@ STACK_COLORS = {
     "PyTorch eager": "#F58518",
     "torch.compile": "#54A24B",
 }
+SIGNATURE_MARKERS = {
+    "bad": "o",
+    "good": "D",
+    "control-fsdp4-tp1": "s",
+    "control-fsdp1-tp4": "^",
+}
+SIGNATURE_LABELS = {
+    "bad": "bad 2x2",
+    "good": "good 2x2",
+    "control-fsdp4-tp1": "ctrl 4x1",
+    "control-fsdp1-tp4": "ctrl 1x4",
+}
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -264,6 +276,141 @@ def plot_normalized_heatmap(data: pd.DataFrame, outdir: Path) -> Path:
   return path
 
 
+def successful_rows_with_relative_time(data: pd.DataFrame) -> pd.DataFrame:
+  success = data[
+      data["status"].eq("success") & data["steady_state_mean_step_time_sec"].notna()
+  ].copy()
+  success["relative_step_time"] = np.nan
+  for stack in STACK_ORDER:
+    for operation in OPERATION_ORDER:
+      mask = (
+          success["execution_stack"].astype(str).eq(stack)
+          & success["operation_family"].astype(str).eq(operation)
+      )
+      good = success[mask & success["signature_label"].astype(str).eq("good")][
+          "steady_state_mean_step_time_sec"
+      ]
+      if good.empty or float(good.iloc[0]) == 0:
+        continue
+      success.loc[mask, "relative_step_time"] = (
+          success.loc[mask, "steady_state_mean_step_time_sec"] / float(good.iloc[0])
+      )
+  return success
+
+
+def add_scatter_legends(ax: plt.Axes) -> None:
+  stack_handles = [
+      plt.Line2D(
+          [0],
+          [0],
+          marker="o",
+          linestyle="",
+          markerfacecolor=STACK_COLORS[stack],
+          markeredgecolor="#222222",
+          label=stack,
+          markersize=8,
+      )
+      for stack in STACK_ORDER
+      if stack != "torch.compile"
+  ]
+  signature_handles = [
+      plt.Line2D(
+          [0],
+          [0],
+          marker=SIGNATURE_MARKERS[signature],
+          linestyle="",
+          markerfacecolor="white",
+          markeredgecolor="#222222",
+          label=SIGNATURE_LABELS[signature],
+          markersize=8,
+      )
+      for signature in SIGNATURE_ORDER
+  ]
+  first = ax.legend(handles=stack_handles, loc="upper left", fontsize=8, title="stack")
+  ax.add_artist(first)
+  ax.legend(
+      handles=signature_handles,
+      loc="lower right",
+      fontsize=8,
+      title="signature",
+  )
+
+
+def plot_scatter(
+    data: pd.DataFrame,
+    outdir: Path,
+    *,
+    y_column: str,
+    ylabel: str,
+    title: str,
+    filename: str,
+    y_log: bool,
+) -> Path:
+  success = successful_rows_with_relative_time(data)
+  fig, axes = plt.subplots(1, 3, figsize=(15, 4.9), sharey=False)
+  for ax, operation in zip(axes, OPERATION_ORDER, strict=True):
+    part = success[success["operation_family"].astype(str).eq(operation)]
+    for stack in STACK_ORDER:
+      if stack == "torch.compile":
+        continue
+      for signature in SIGNATURE_ORDER:
+        row = part[
+            part["execution_stack"].astype(str).eq(stack)
+            & part["signature_label"].astype(str).eq(signature)
+        ]
+        if row.empty or pd.isna(row[y_column].iloc[0]):
+          continue
+        ax.scatter(
+            float(row["chunk_loop_count"].iloc[0]),
+            float(row[y_column].iloc[0]),
+            s=110,
+            marker=SIGNATURE_MARKERS[signature],
+            color=STACK_COLORS[stack],
+            edgecolor="#222222",
+            linewidth=0.8,
+            alpha=0.92,
+        )
+    ax.set_title(operation.replace("_", " "))
+    ax.set_xscale("log", base=2)
+    if y_log:
+      ax.set_yscale("log", base=2)
+    if y_column == "relative_step_time":
+      ax.axhline(1.0, color="#333333", linewidth=1.0, alpha=0.75)
+    ax.set_xlabel("chunk_loop_count")
+    ax.set_ylabel(ylabel)
+    ax.grid(True, which="both", alpha=0.22)
+  add_scatter_legends(axes[0])
+  fig.suptitle(title)
+  fig.tight_layout()
+  path = outdir / filename
+  fig.savefig(path, dpi=180)
+  plt.close(fig)
+  return path
+
+
+def plot_scatter_views(data: pd.DataFrame, outdir: Path) -> list[Path]:
+  return [
+      plot_scatter(
+          data,
+          outdir,
+          y_column="steady_state_mean_step_time_sec",
+          ylabel="step time (s)",
+          title="A100: step time vs chunk-loop count",
+          filename="a100_scatter_chunk_loop_vs_step_time.png",
+          y_log=False,
+      ),
+      plot_scatter(
+          data,
+          outdir,
+          y_column="relative_step_time",
+          ylabel="relative step time",
+          title="A100: normalized slowdown vs chunk-loop count",
+          filename="a100_scatter_chunk_loop_vs_relative_time.png",
+          y_log=False,
+      ),
+  ]
+
+
 def normalized_value_grid(data: pd.DataFrame) -> tuple[np.ndarray, dict[tuple[str, str, str], str]]:
   success = data[
       data["status"].eq("success") & data["steady_state_mean_step_time_sec"].notna()
@@ -451,6 +598,7 @@ def main() -> None:
       plot_step_times(data, outdir),
       plot_bad_good(ratios, outdir),
       plot_normalized_heatmap(data, outdir),
+      *plot_scatter_views(data, outdir),
       plot_layered_3d_heatmap(data, outdir),
   ]
   report = write_report(outdir=outdir, data=data, ratios=ratios, failures=failures, plots=plots)
