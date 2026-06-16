@@ -24,7 +24,9 @@ commands:
   - . .venv/bin/activate && python -m pip install -r requirements.txt
   - . .venv/bin/activate && python -m pip install -e .
   - . .venv/bin/activate && python -m pip install -U "jax[cuda12]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html pandas matplotlib
+  - . .venv/bin/activate && python -m pip install -U torch --index-url https://download.pytorch.org/whl/cu124
   - . .venv/bin/activate && python -c "import jax; print('jax', jax.__version__, 'backend', jax.default_backend(), 'devices', jax.devices())"
+  - . .venv/bin/activate && python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'devices', torch.cuda.device_count())"
   - |
     . .venv/bin/activate
     python 01-CCE/run_mesh_pathology_matrix.py ${{ run.args }} --force

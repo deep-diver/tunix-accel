@@ -33,6 +33,7 @@ from typing import Any, Iterable
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 MICROBENCH_RUNNER = SCRIPT_DIR / "run_mesh_pathology_microbench.py"
+TORCH_MICROBENCH_RUNNER = SCRIPT_DIR / "run_mesh_pathology_torchbench.py"
 CCE_RUNNER = SCRIPT_DIR / "run_v5e_cce_matrix.py"
 
 HARDWARE_TARGETS: dict[str, dict[str, Any]] = {
@@ -83,6 +84,49 @@ WORKLOADS: dict[str, dict[str, Any]] = {
         "runner": "jax_microbench",
         "description": "Chunk-loop projection matmul plus TP all-reduce.",
     },
+    "torch_eager_chunked_matmul_loop": {
+        "runner": "torch_microbench",
+        "execution_mode": "eager",
+        "operation_family": "chunked_matmul_loop",
+        "description": "PyTorch eager chunk-loop projection matmul without XLA.",
+    },
+    "torch_eager_collective_loop": {
+        "runner": "torch_microbench",
+        "execution_mode": "eager",
+        "operation_family": "collective_loop",
+        "description": "PyTorch eager repeated NCCL all-reduce over chunk-sized tensors.",
+    },
+    "torch_eager_projection_collective_loop": {
+        "runner": "torch_microbench",
+        "execution_mode": "eager",
+        "operation_family": "projection_collective_loop",
+        "description": "PyTorch eager projection matmul plus NCCL all-reduce.",
+    },
+    "torch_compile_chunked_matmul_loop": {
+        "runner": "torch_microbench",
+        "execution_mode": "compile",
+        "operation_family": "chunked_matmul_loop",
+        "description": "torch.compile/Inductor chunk-loop projection matmul without XLA.",
+    },
+    "torch_compile_collective_loop": {
+        "runner": "torch_microbench",
+        "execution_mode": "compile",
+        "operation_family": "collective_loop",
+        "description": "torch.compile/Inductor repeated NCCL all-reduce.",
+    },
+    "torch_compile_projection_collective_loop": {
+        "runner": "torch_microbench",
+        "execution_mode": "compile",
+        "operation_family": "projection_collective_loop",
+        "description": "torch.compile/Inductor projection matmul plus NCCL all-reduce.",
+    },
+}
+
+DEFAULT_WORKLOADS = {
+    "cce_train",
+    "chunked_matmul_loop",
+    "collective_loop",
+    "projection_collective_loop",
 }
 
 TARGET_SIGNATURES = [
@@ -219,6 +263,8 @@ def base_case(
       "workload_family": workload_family,
       "workload_runner": workload["runner"],
       "workload_description": workload["description"],
+      "operation_family": workload.get("operation_family", workload_family),
+      "execution_mode": workload.get("execution_mode", ""),
       "signature_label": signature["signature_label"],
       "fsdp_degree": signature["fsdp_degree"],
       "tp_degree": signature["tp_degree"],
@@ -259,7 +305,11 @@ def build_matrix(args: argparse.Namespace) -> list[dict[str, Any]]:
       set(HARDWARE_TARGETS),
       "hardware target",
   )
-  workloads = parse_csv_values(args.workloads, set(WORKLOADS), "workload")
+  workloads = (
+      parse_csv_values(args.workloads, set(WORKLOADS), "workload")
+      if args.workloads
+      else sorted(DEFAULT_WORKLOADS)
+  )
   cases = []
   experiment_id = 0
   for repeat_index in range(args.repeats):
@@ -291,6 +341,8 @@ def validate_matrix(args: argparse.Namespace, cases: list[dict[str, Any]]) -> No
           f"{case['case_name']} mesh does not match device_count: "
           f"{case['fsdp_degree']} * {case['tp_degree']} != {case['device_count']}"
       )
+    if case["workload_runner"] == "torch_microbench" and case["backend"] != "gpu":
+      raise ValueError(f"{case['case_name']} is a PyTorch GPU workload but backend={case['backend']}.")
 
 
 def select_cases(args: argparse.Namespace, cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -316,7 +368,7 @@ def configure_env(args: argparse.Namespace, case: dict[str, Any]) -> dict[str, s
     pythonpath += os.pathsep + env["PYTHONPATH"]
   env["PYTHONPATH"] = pythonpath
   env["PYTHONUNBUFFERED"] = "1"
-  if not args.disable_xla_dump:
+  if case["workload_runner"] in {"jax_microbench", "tunix_cce"} and not args.disable_xla_dump:
     xla_flags = env.get("XLA_FLAGS", "").strip()
     dump_parts = [
         f"--xla_dump_to={case['xla_dir']}",
@@ -373,6 +425,54 @@ def microbench_command(case: dict[str, Any]) -> list[str]:
   if case["profiler_path"]:
     command.extend(["--profiler-dir", case["profiler_path"]])
   return command
+
+
+def torch_microbench_command(case: dict[str, Any]) -> list[str]:
+  return [
+      sys.executable,
+      "-m",
+      "torch.distributed.run",
+      "--standalone",
+      "--nnodes",
+      "1",
+      "--nproc_per_node",
+      str(case["device_count"]),
+      str(TORCH_MICROBENCH_RUNNER),
+      "--workload",
+      case["operation_family"],
+      "--execution-mode",
+      case["execution_mode"],
+      "--backend",
+      case["backend"],
+      "--hardware-target",
+      case["hardware_target"],
+      "--accelerator-type",
+      case["accelerator_type"],
+      "--mesh-fsdp",
+      str(case["fsdp_degree"]),
+      "--mesh-tp",
+      str(case["tp_degree"]),
+      "--global-batch-size",
+      str(case["global_batch_size"]),
+      "--sequence-length",
+      str(case["sequence_length"]),
+      "--hidden-size",
+      str(case["hidden_size"]),
+      "--vocab-size",
+      str(case["vocab_size"]),
+      "--token-chunk",
+      str(case["token_chunk"]),
+      "--vocab-chunk",
+      str(case["vocab_chunk"]),
+      "--warmup-steps",
+      str(case["warmup_steps"]),
+      "--measured-steps",
+      str(case["measured_steps"]),
+      "--seed",
+      str(case["seed"]),
+      "--outdir",
+      case["run_dir"],
+  ]
 
 
 def cce_command(args: argparse.Namespace, case: dict[str, Any], cce_results_path: Path) -> list[str]:
@@ -445,6 +545,9 @@ def run_case(args: argparse.Namespace, case: dict[str, Any]) -> dict[str, Any]:
   if case["workload_runner"] == "jax_microbench":
     command = microbench_command(case)
     result_path = run_dir / "summary.json"
+  elif case["workload_runner"] == "torch_microbench":
+    command = torch_microbench_command(case)
+    result_path = run_dir / "summary.json"
   else:
     cce_results_path = run_dir / "cce_delegate_result.jsonl"
     command = cce_command(args, case, cce_results_path)
@@ -453,14 +556,21 @@ def run_case(args: argparse.Namespace, case: dict[str, Any]) -> dict[str, Any]:
   with log_path.open("w") as log:
     log.write("$ " + " ".join(command) + "\n")
     log.flush()
-    proc = subprocess.run(
-        command,
-        cwd=REPO_ROOT,
-        env=configure_env(args, case),
-        stdout=log,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
+    try:
+      proc = subprocess.run(
+          command,
+          cwd=REPO_ROOT,
+          env=configure_env(args, case),
+          stdout=log,
+          stderr=subprocess.STDOUT,
+          check=False,
+          timeout=args.case_timeout_sec if args.case_timeout_sec > 0 else None,
+      )
+      timed_out = False
+    except subprocess.TimeoutExpired:
+      timed_out = True
+      proc = subprocess.CompletedProcess(command, returncode=124)
+      log.write(f"\nTIMEOUT after {args.case_timeout_sec} seconds\n")
   elapsed = time.monotonic() - started
 
   row = {
@@ -473,7 +583,7 @@ def run_case(args: argparse.Namespace, case: dict[str, Any]) -> dict[str, Any]:
       "log_path": str(log_path.resolve()),
   }
   if proc.returncode == 0 and result_path.exists():
-    if case["workload_runner"] == "jax_microbench":
+    if case["workload_runner"] in {"jax_microbench", "torch_microbench"}:
       summary = json.loads(result_path.read_text())
     else:
       rows = read_jsonl(result_path)
@@ -482,6 +592,9 @@ def run_case(args: argparse.Namespace, case: dict[str, Any]) -> dict[str, Any]:
     row["status"] = summary.get("status", "success")
   else:
     row.update(parse_failure(log_path))
+    if timed_out:
+      row["failure_type"] = "timeout"
+      row["error_message"] = f"Case exceeded timeout_sec={args.case_timeout_sec}."
   (run_dir / "case_summary.json").write_text(json.dumps(row, indent=2, sort_keys=True) + "\n")
   return row
 
@@ -547,6 +660,7 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--num-shards", type=int, default=1)
   parser.add_argument("--experiment-id", type=int, action="append", default=[])
   parser.add_argument("--limit", type=int, default=None)
+  parser.add_argument("--case-timeout-sec", type=int, default=0)
   parser.add_argument("--run-id", default="")
   parser.add_argument(
       "--outdir",

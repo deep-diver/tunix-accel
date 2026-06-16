@@ -37,6 +37,7 @@ def args(**overrides):
       "num_shards": 1,
       "experiment_id": [],
       "limit": None,
+      "case_timeout_sec": 0,
       "run_id": "test-run",
       "outdir": Path("/tmp/mesh-pathology-test"),
       "manifest_path": Path("/tmp/mesh-pathology-test/manifest.jsonl"),
@@ -67,6 +68,23 @@ def test_pilot_matrix_has_16_scenario_groups_and_64_rows():
       "good",
       "control-fsdp4-tp1",
       "control-fsdp1-tp4",
+  }
+
+
+def test_torch_workloads_are_opt_in_gpu_rows():
+  runner = load_runner()
+  cases = runner.build_matrix(
+      args(
+          hardware_targets="gpu-a100-80gb-4",
+          workloads="torch_eager_chunked_matmul_loop,torch_compile_collective_loop",
+      )
+  )
+  assert len(cases) == 8
+  assert {case["workload_runner"] for case in cases} == {"torch_microbench"}
+  assert {case["execution_mode"] for case in cases} == {"eager", "compile"}
+  assert {case["operation_family"] for case in cases} == {
+      "chunked_matmul_loop",
+      "collective_loop",
   }
 
 
