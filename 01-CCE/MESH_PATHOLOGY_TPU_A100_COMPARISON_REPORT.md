@@ -25,7 +25,14 @@ The final cross-hardware comparison now has 32 successful rows:
 - TPU+A100 combined 32-row JSONL: `01-CCE/data/mesh_pathology_tpu_a100_combined/results.jsonl`
 - TPU+A100 combined analysis: `01-CCE/data/mesh_pathology_tpu_a100_combined/analysis`
 
-![TPU/A100 bad-good slowdown](data/mesh_pathology_tpu_a100_combined/analysis/bad_good_slowdown_by_hardware_workload.png)
+## Per-Accelerator Operation Comparisons
+
+The useful comparison is within one accelerator at a time: for each workload,
+how much slower is the small-chunk bad row than the large-chunk good row?
+
+![TPU v5e bad-good slowdown by workload](data/mesh_pathology_tpu_a100_combined/analysis/bad_good_ratio_by_workload_tpu_v5e.png)
+
+![A100 bad-good slowdown by workload](data/mesh_pathology_tpu_a100_combined/analysis/bad_good_ratio_by_workload_a100.png)
 
 ## Bad vs Good Ratios
 
@@ -63,12 +70,27 @@ The TPU result is not a simple copy of the A100 result:
   bad/good planned HBM is equal at 2.65 GiB/chip, while step time changes
   18.68x.
 
+## What This Does Not Prove
+
+These experiments do not prove that XLA is not the cause. In fact, all four
+workloads are JAX workloads that lower through XLA, so XLA remains one of the
+most likely layers where the bad behavior is expressed.
+
+What the experiment does show is narrower:
+
+- The slowdown is not exclusively a high-level CCE API artifact, because
+  non-CCE chunked matmul slows down on both A100 and TPU.
+- Collective count alone does not explain TPU v5e CCE, because TPU
+  `collective_loop` reverses direction and TPU `projection_collective_loop` is
+  only 1.13x slower.
+- Planned HBM does not explain the CCE slowdown, because TPU CCE bad/good HBM
+  is equal while step time changes 18.68x.
+
 The updated hypothesis is therefore sharper: small chunk granularity is a
-general risk factor, but the extreme TPU v5e CCE failure is not explained by
-collective count alone. It appears to require the interaction between the CCE
-loss-head loop, XLA lowering, and the FSDP/TP mesh. The non-CCE synthetic TPU
-rows prove that small loop granularity can hurt outside CCE, but they do not
-fully reproduce the 18.68x TPU CCE collapse.
+general risk factor, but the extreme TPU v5e CCE failure likely requires the
+interaction between the CCE loss-head loop, XLA lowering, and the FSDP/TP mesh.
+The non-CCE synthetic TPU rows prove that small loop granularity can hurt
+outside CCE, but they do not fully reproduce the 18.68x TPU CCE collapse.
 
 ## Run Details
 
