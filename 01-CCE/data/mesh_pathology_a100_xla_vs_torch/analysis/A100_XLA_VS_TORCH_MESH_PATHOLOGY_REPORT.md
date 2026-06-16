@@ -32,6 +32,7 @@ This report compares the same A100 4-GPU synthetic mesh-pathology rows across JA
 - `mesh_pathology_a100_xla_vs_torch/analysis/a100_step_time_by_operation_stack.png`
 - `mesh_pathology_a100_xla_vs_torch/analysis/a100_bad_good_slowdown_xla_vs_torch.png`
 - `mesh_pathology_a100_xla_vs_torch/analysis/a100_normalized_signature_heatmap_xla_vs_torch.png`
+- `mesh_pathology_a100_xla_vs_torch/analysis/a100_layered_3d_heatmap_xla_vs_torch.png`
 
 ## Most Likely Interpretation
 

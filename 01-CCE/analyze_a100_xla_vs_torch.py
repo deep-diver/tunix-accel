@@ -9,7 +9,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+import numpy as np
 import pandas as pd
 
 
@@ -261,6 +264,122 @@ def plot_normalized_heatmap(data: pd.DataFrame, outdir: Path) -> Path:
   return path
 
 
+def normalized_value_grid(data: pd.DataFrame) -> tuple[np.ndarray, dict[tuple[str, str, str], str]]:
+  success = data[
+      data["status"].eq("success") & data["steady_state_mean_step_time_sec"].notna()
+  ].copy()
+  values = np.full((len(STACK_ORDER), len(OPERATION_ORDER), len(SIGNATURE_ORDER)), np.nan)
+  failure_labels: dict[tuple[str, str, str], str] = {}
+  for _, row in data[~data["status"].eq("success")].iterrows():
+    failure_labels[(
+        str(row.get("execution_stack", "")),
+        str(row.get("operation_family", "")),
+        str(row.get("signature_label", "")),
+    )] = "fail"
+  for stack_index, stack in enumerate(STACK_ORDER):
+    for operation_index, operation in enumerate(OPERATION_ORDER):
+      part = success[
+          success["execution_stack"].astype(str).eq(stack)
+          & success["operation_family"].astype(str).eq(operation)
+      ]
+      good = part[part["signature_label"].astype(str).eq("good")][
+          "steady_state_mean_step_time_sec"
+      ]
+      if good.empty or float(good.iloc[0]) == 0:
+        continue
+      denominator = float(good.iloc[0])
+      for signature_index, signature in enumerate(SIGNATURE_ORDER):
+        value = part[part["signature_label"].astype(str).eq(signature)][
+            "steady_state_mean_step_time_sec"
+        ]
+        if not value.empty:
+          values[stack_index, operation_index, signature_index] = float(value.iloc[0]) / denominator
+  return values, failure_labels
+
+
+def plot_layered_3d_heatmap(data: pd.DataFrame, outdir: Path) -> Path:
+  values, failure_labels = normalized_value_grid(data)
+  finite = values[np.isfinite(values)]
+  vmax = max(1.0, float(np.nanmax(finite))) if finite.size else 1.0
+  norm = mpl.colors.Normalize(vmin=0.0, vmax=vmax)
+  cmap = plt.get_cmap("YlOrRd")
+
+  fig = plt.figure(figsize=(11.5, 7.5))
+  ax = fig.add_subplot(111, projection="3d")
+  ax.set_box_aspect((1.45, 1.0, 0.75))
+
+  for stack_index, stack in enumerate(STACK_ORDER):
+    z = stack_index * 1.15
+    for operation_index, operation in enumerate(OPERATION_ORDER):
+      for signature_index, signature in enumerate(SIGNATURE_ORDER):
+        value = values[stack_index, operation_index, signature_index]
+        x0, x1 = signature_index - 0.44, signature_index + 0.44
+        y0, y1 = operation_index - 0.38, operation_index + 0.38
+        verts = [[(x0, y0, z), (x1, y0, z), (x1, y1, z), (x0, y1, z)]]
+        if np.isfinite(value):
+          facecolor = cmap(norm(value))
+          label = f"{value:.1f}x"
+          edgecolor = "#3A3A3A"
+          alpha = 0.88
+        else:
+          state = failure_labels.get((stack, operation, signature), "n/a")
+          facecolor = (0.58, 0.58, 0.58, 0.34)
+          label = state
+          edgecolor = "#777777"
+          alpha = 0.42
+        collection = Poly3DCollection(
+            verts,
+            facecolors=[facecolor],
+            edgecolors=edgecolor,
+            linewidths=0.75,
+            alpha=alpha,
+        )
+        ax.add_collection3d(collection)
+        text_color = "#111111" if np.isfinite(value) and value < vmax * 0.72 else "#F8F8F8"
+        if not np.isfinite(value):
+          text_color = "#333333"
+        ax.text(
+            signature_index,
+            operation_index,
+            z + 0.035,
+            label,
+            ha="center",
+            va="center",
+            fontsize=8.5,
+            color=text_color,
+            zorder=10,
+        )
+  ax.set_xlim(-0.6, len(SIGNATURE_ORDER) - 0.4)
+  ax.set_ylim(-0.55, len(OPERATION_ORDER) - 0.15)
+  ax.set_zlim(-0.2, (len(STACK_ORDER) - 1) * 1.15 + 0.35)
+  ax.set_xticks(range(len(SIGNATURE_ORDER)))
+  ax.set_xticklabels(["bad\n2x2", "good\n2x2", "ctrl\n4x1", "ctrl\n1x4"], fontsize=9)
+  ax.set_yticks(range(len(OPERATION_ORDER)))
+  ax.set_yticklabels([
+      "chunked\nmatmul",
+      "collective",
+      "projection\n+ collective",
+  ], fontsize=9)
+  ax.set_zticks([index * 1.15 for index in range(len(STACK_ORDER))])
+  ax.set_zticklabels(STACK_ORDER, fontsize=9)
+  ax.set_xlabel("mesh/chunk signature", labelpad=12)
+  ax.set_ylabel("operation", labelpad=12)
+  ax.set_zlabel("execution stack", labelpad=10)
+  ax.set_title("A100 layered 3D heatmap: normalized step time by stack", pad=18)
+  ax.view_init(elev=24, azim=-52)
+  ax.grid(True, alpha=0.22)
+
+  scalar = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
+  scalar.set_array([])
+  colorbar = fig.colorbar(scalar, ax=ax, shrink=0.62, pad=0.08)
+  colorbar.set_label("relative step time, divided by good 2x2 within each stack/operation")
+  fig.subplots_adjust(left=0.02, right=0.86, top=0.92, bottom=0.02)
+  path = outdir / "a100_layered_3d_heatmap_xla_vs_torch.png"
+  fig.savefig(path, dpi=190)
+  plt.close(fig)
+  return path
+
+
 def write_report(
     *,
     outdir: Path,
@@ -332,6 +451,7 @@ def main() -> None:
       plot_step_times(data, outdir),
       plot_bad_good(ratios, outdir),
       plot_normalized_heatmap(data, outdir),
+      plot_layered_3d_heatmap(data, outdir),
   ]
   report = write_report(outdir=outdir, data=data, ratios=ratios, failures=failures, plots=plots)
   print(f"combined_results={outdir / 'combined_results.jsonl'}")

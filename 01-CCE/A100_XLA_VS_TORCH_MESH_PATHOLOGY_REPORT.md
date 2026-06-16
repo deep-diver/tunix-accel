@@ -44,6 +44,10 @@ PyTorch eager reproduces the small-chunk slowdown without XLA.
 
 ![A100 normalized signature heatmap](data/mesh_pathology_a100_xla_vs_torch/analysis/a100_normalized_signature_heatmap_xla_vs_torch.png)
 
+Experimental layered view:
+
+![A100 layered 3D heatmap](data/mesh_pathology_a100_xla_vs_torch/analysis/a100_layered_3d_heatmap_xla_vs_torch.png)
+
 ## Interpretation
 
 The phenomenon is not XLA-only. Even in PyTorch eager, which does not use XLA,
