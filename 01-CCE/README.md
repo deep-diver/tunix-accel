@@ -291,6 +291,133 @@ python3 01-CCE/analyze_mesh_pathology_results.py \
 See `MESH_PATHOLOGY_EXPERIMENT_PLAN.md` for the workload definitions, hardware
 target rationale, and the latest dstack offer snapshot used for planning.
 
+### Dense Synthetic Sweep
+
+Use the dense preset when the goal is root-cause identification rather than the
+four-row CCE reproduction. The default dense design uses the same three
+synthetic operations on one shape (`b16/L512`), three 4-device meshes, five
+token chunk sizes, and seven vocab chunk sizes:
+
+```bash
+python3 01-CCE/run_mesh_pathology_matrix.py \
+  --preset dense-synthetic \
+  --hardware-targets tpu-v5e-4 \
+  --dry-run \
+  --outdir /tmp/mesh-pathology-dense-tpu
+```
+
+That default creates 315 rows per hardware/stack. To make the shape axis denser:
+
+```bash
+python3 01-CCE/run_mesh_pathology_matrix.py \
+  --preset dense-synthetic \
+  --hardware-targets tpu-v5e-4 \
+  --shapes b16/L512,b16/L1024,b32/L512 \
+  --dry-run \
+  --outdir /tmp/mesh-pathology-dense-tpu-shapes
+```
+
+Run one TPU shard:
+
+```bash
+python3 01-CCE/run_mesh_pathology_matrix.py \
+  --preset dense-synthetic \
+  --hardware-targets tpu-v5e-4 \
+  --shapes b16/L512,b16/L1024,b32/L512 \
+  --num-shards 8 \
+  --shard-index 0 \
+  --case-timeout-sec 900 \
+  --outdir /tmp/mesh-pathology-dense-tpu \
+  --force
+```
+
+Run the same design on GPU/JAX or GPU/PyTorch eager by selecting workloads:
+
+```bash
+# GPU/JAX
+python3 01-CCE/run_mesh_pathology_matrix.py \
+  --preset dense-synthetic \
+  --hardware-targets gpu-a100-80gb-4 \
+  --workloads chunked_matmul_loop,collective_loop,projection_collective_loop \
+  --num-shards 8 \
+  --shard-index 0 \
+  --case-timeout-sec 900 \
+  --outdir /tmp/mesh-pathology-dense-a100-jax \
+  --force
+
+# GPU/PyTorch eager, no XLA
+python3 01-CCE/run_mesh_pathology_matrix.py \
+  --preset dense-synthetic \
+  --hardware-targets gpu-a100-80gb-4 \
+  --workloads torch_eager_chunked_matmul_loop,torch_eager_collective_loop,torch_eager_projection_collective_loop \
+  --num-shards 8 \
+  --shard-index 0 \
+  --case-timeout-sec 900 \
+  --outdir /tmp/mesh-pathology-dense-a100-torch \
+  --force
+```
+
+Launch a dense GPU shard on dstack with the lighter synthetic environment:
+
+```bash
+uvx --from dstack dstack apply \
+  -f 01-CCE/dstack_mesh_pathology_synthetic_gpu.yml \
+  --gpu A100:4:80GB \
+  -n mesh-pathology-dense-a100-torch-s0 \
+  -- \
+  --preset dense-synthetic \
+  --hardware-targets gpu-a100-80gb-4 \
+  --workloads torch_eager_chunked_matmul_loop,torch_eager_collective_loop,torch_eager_projection_collective_loop \
+  --num-shards 8 \
+  --shard-index 0 \
+  --case-timeout-sec 900 \
+  --outdir /tmp/mesh-pathology-dense-a100-torch
+```
+
+After collecting logs/artifacts from a dstack run, stop the run/fleet so paid
+capacity is released:
+
+```bash
+uvx --from dstack dstack stop -n mesh-pathology-dense-a100-torch-s0 --yes
+uvx --from dstack dstack fleet list -v
+```
+
+The sweep axes can be overridden directly:
+
+```bash
+python3 01-CCE/run_mesh_pathology_matrix.py \
+  --preset dense-synthetic \
+  --hardware-targets tpu-v5e-4 \
+  --mesh-configs 4x1,2x2,1x4 \
+  --token-chunks 64,128,256,512,1024 \
+  --vocab-chunks 4096,8192,16384,32768,65536,131072,262144 \
+  --dry-run \
+  --outdir /tmp/mesh-pathology-dense-custom
+```
+
+Merge shard outputs, tolerating missing shard files and failed rows:
+
+```bash
+python3 01-CCE/merge_v5e_cce_results.py \
+  --results-dir /tmp/mesh-pathology-dense-a100-torch/results
+```
+
+Analyze complete or partial dense results:
+
+```bash
+python3 01-CCE/analyze_mesh_pathology_dense_sweep.py \
+  --results /tmp/mesh-pathology-dense-a100-torch/results/shard_*.jsonl \
+  --manifest /tmp/mesh-pathology-dense-a100-torch/manifest.jsonl \
+  --outdir /tmp/mesh-pathology-dense-a100-torch/analysis
+```
+
+The dense analysis writes fastest-configuration, outlier, recovery, missing-row,
+failure, and log-step-time model tables. The model explicitly tests whether the
+slowdown is explained by chunk-loop count alone or by the interaction between
+loop count, TP degree, and collective-bearing operations. Scatter and heatmap
+plots are emitted per accelerator/stack so accelerators are not visually
+compared against each other.
+
 ## Gemma3 1B / Gemma4 E2B Transfer Package
 
 The transfer package asks whether the 270M CCE findings survive a larger

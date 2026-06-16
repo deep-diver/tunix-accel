@@ -24,6 +24,10 @@ def args(**overrides):
       "hardware_targets": None,
       "workloads": None,
       "repeats": 1,
+      "shapes": None,
+      "mesh_configs": None,
+      "token_chunks": None,
+      "vocab_chunks": None,
       "hidden_size": 320,
       "vocab_size": 262144,
       "warmup_steps": 3,
@@ -86,6 +90,78 @@ def test_torch_workloads_are_opt_in_gpu_rows():
       "chunked_matmul_loop",
       "collective_loop",
   }
+
+
+def test_dense_synthetic_default_matrix_decouples_chunk_axes():
+  runner = load_runner()
+  cases = runner.build_matrix(
+      args(
+          preset="dense-synthetic",
+          hardware_targets="tpu-v5e-4",
+      )
+  )
+  assert len(cases) == 315
+  assert {case["workload_family"] for case in cases} == {
+      "chunked_matmul_loop",
+      "collective_loop",
+      "projection_collective_loop",
+  }
+  assert {case["mesh_configuration"] for case in cases} == {
+      "fsdp=4,tp=1",
+      "fsdp=2,tp=2",
+      "fsdp=1,tp=4",
+  }
+  assert {case["token_chunk"] for case in cases} == {64, 128, 256, 512, 1024}
+  assert {case["vocab_chunk"] for case in cases} == {
+      4096,
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144,
+  }
+  assert all(case["chunk_loop_count"] == case["token_loop_count"] * case["vocab_loop_count"] for case in cases)
+
+
+def test_dense_synthetic_can_select_torch_eager_gpu_stack():
+  runner = load_runner()
+  cases = runner.build_matrix(
+      args(
+          preset="dense-synthetic",
+          hardware_targets="gpu-a100-80gb-4",
+          workloads="torch_eager_chunked_matmul_loop",
+          token_chunks="128,512",
+          vocab_chunks="8192,65536",
+          mesh_configs="2x2",
+          shapes="b16/L512",
+      )
+  )
+  assert len(cases) == 4
+  assert {case["workload_runner"] for case in cases} == {"torch_microbench"}
+  assert {case["execution_mode"] for case in cases} == {"eager"}
+  assert {case["chunk_configuration"] for case in cases} == {
+      "128/8192",
+      "128/65536",
+      "512/8192",
+      "512/65536",
+  }
+
+
+def test_dense_mesh_config_accepts_fsdp_tp_form():
+  runner = load_runner()
+  cases = runner.build_matrix(
+      args(
+          preset="dense-synthetic",
+          hardware_targets="tpu-v5e-4",
+          workloads="chunked_matmul_loop",
+          token_chunks="128",
+          vocab_chunks="8192",
+          mesh_configs="fsdp=2,tp=2",
+      )
+  )
+  assert len(cases) == 1
+  assert cases[0]["mesh_configuration"] == "fsdp=2,tp=2"
 
 
 def test_primary_gpu_target_is_a100_80gb_four_way():

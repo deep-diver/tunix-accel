@@ -1,0 +1,36 @@
+type: task
+name: mesh-pathology-synthetic-gpu
+
+# Override the concrete GPU with `dstack apply --gpu ...`.
+# Examples:
+#   --gpu A100:4:80GB
+#   --gpu L40S:4:48GB
+#   --gpu H100:4:80GB
+resources:
+  gpu: A100:4:80GB
+  disk: 100GB
+
+image: nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+working_dir: /workflow
+
+commands:
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y git python3.11 python3.11-venv python3-pip
+  - python3.11 -m venv .venv
+  - . .venv/bin/activate && python -m pip install -U pip wheel setuptools
+  - . .venv/bin/activate && python -m pip install -U numpy pandas matplotlib
+  - . .venv/bin/activate && python -m pip install -U torch --index-url https://download.pytorch.org/whl/cu124
+  - . .venv/bin/activate && python -m pip install -U "jax[cuda12]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+  - . .venv/bin/activate && python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'devices', torch.cuda.device_count())"
+  - . .venv/bin/activate && python -c "import jax; print('jax', jax.__version__, 'backend', jax.default_backend(), 'devices', jax.devices())"
+  - |
+    . .venv/bin/activate
+    python 01-CCE/run_mesh_pathology_matrix.py ${{ run.args }} --force
+    status=$?
+    echo "=== MESH_PATHOLOGY_RESULTS_JSONL_BEGIN ==="
+    find /tmp -path "*/mesh-pathology-*/results/*.jsonl" -type f -print -exec sed -n '1,240p' {} \; || true
+    echo "=== MESH_PATHOLOGY_RESULTS_JSONL_END ==="
+    echo "=== MESH_PATHOLOGY_CASE_LOG_TAILS_BEGIN ==="
+    find /tmp -path "*/mesh-pathology-*/runs/*/runner.log" -type f -print -exec tail -n 120 {} \; || true
+    echo "=== MESH_PATHOLOGY_CASE_LOG_TAILS_END ==="
+    exit "${status}"

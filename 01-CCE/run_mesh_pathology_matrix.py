@@ -9,7 +9,10 @@ collectives?  The default pilot matrix is:
 * 4 workload families: CCE training plus three synthetic JAX microbenches
 * 4 target signatures: bad/good/control rows from the CCE profiler study
 
-So there are 16 scenario groups and 64 concrete experiment rows.
+So there are 16 scenario groups and 64 concrete experiment rows.  The
+`dense-synthetic` preset keeps CCE out of the default path and expands the
+microbench matrix over token/vocab chunk axes so TPU and GPU stacks can be
+compared with the same experimental design.
 """
 
 from __future__ import annotations
@@ -123,12 +126,21 @@ WORKLOADS: dict[str, dict[str, Any]] = {
     },
 }
 
-DEFAULT_WORKLOADS = {
+PILOT_DEFAULT_WORKLOADS = {
     "cce_train",
     "chunked_matmul_loop",
     "collective_loop",
     "projection_collective_loop",
 }
+SYNTHETIC_JAX_WORKLOADS = {
+    "chunked_matmul_loop",
+    "collective_loop",
+    "projection_collective_loop",
+}
+DENSE_DEFAULT_TOKEN_CHUNKS = [64, 128, 256, 512, 1024]
+DENSE_DEFAULT_VOCAB_CHUNKS = [4096, 8192, 16384, 32768, 65536, 131072, 262144]
+DENSE_DEFAULT_SHAPES = [(16, 512)]
+DENSE_DEFAULT_MESH_CONFIGS = [(4, 1), (2, 2), (1, 4)]
 
 TARGET_SIGNATURES = [
     {
@@ -174,6 +186,50 @@ TARGET_SIGNATURES = [
 ]
 
 
+def build_signatures(args: argparse.Namespace) -> list[dict[str, Any]]:
+  if args.preset == "pilot":
+    return list(TARGET_SIGNATURES)
+  if args.preset != "dense-synthetic":
+    raise ValueError(f"Unknown preset: {args.preset}")
+
+  token_chunks = parse_int_csv_values(args.token_chunks, DENSE_DEFAULT_TOKEN_CHUNKS, "token-chunks")
+  vocab_chunks = parse_int_csv_values(args.vocab_chunks, DENSE_DEFAULT_VOCAB_CHUNKS, "vocab-chunks")
+  shapes = parse_shapes(args.shapes)
+  mesh_configs = parse_mesh_configs(args.mesh_configs)
+  signatures: list[dict[str, Any]] = []
+  skipped = 0
+  for global_batch_size, sequence_length in shapes:
+    tokens = global_batch_size * sequence_length
+    for fsdp_degree, tp_degree in mesh_configs:
+      for token_chunk in token_chunks:
+        for vocab_chunk in vocab_chunks:
+          if tokens % token_chunk != 0 or args.vocab_size % vocab_chunk != 0:
+            skipped += 1
+            continue
+          signatures.append({
+              "signature_label": (
+                  f"b{global_batch_size}_L{sequence_length}_"
+                  f"fsdp{fsdp_degree}_tp{tp_degree}_"
+                  f"tc{token_chunk}_vc{vocab_chunk}"
+              ),
+              "fsdp_degree": fsdp_degree,
+              "tp_degree": tp_degree,
+              "global_batch_size": global_batch_size,
+              "sequence_length": sequence_length,
+              "token_chunk": token_chunk,
+              "vocab_chunk": vocab_chunk,
+              "cce_profiler_experiment_id": -1,
+          })
+  if not signatures:
+    raise ValueError(
+        "Dense synthetic preset produced no valid signatures. "
+        "Check that token chunks divide batch*sequence and vocab chunks divide vocab size."
+    )
+  if skipped:
+    print(f"skipped_invalid_dense_chunk_configs={skipped}", file=sys.stderr)
+  return signatures
+
+
 def utc_now() -> str:
   return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -186,6 +242,90 @@ def parse_csv_values(value: str | None, allowed: set[str], label: str) -> list[s
   if unknown:
     raise ValueError(f"Unknown {label}: {unknown}. Allowed: {sorted(allowed)}")
   return parsed
+
+
+def parse_int_csv_values(value: str | None, default: list[int], label: str) -> list[int]:
+  if not value:
+    return list(default)
+  parsed = []
+  for item in value.split(","):
+    item = item.strip()
+    if not item:
+      continue
+    try:
+      parsed.append(int(item))
+    except ValueError as exc:
+      raise ValueError(f"Invalid {label} value {item!r}; expected integers.") from exc
+  if not parsed:
+    raise ValueError(f"--{label} did not contain any values.")
+  if any(item <= 0 for item in parsed):
+    raise ValueError(f"All {label} values must be positive: {parsed}")
+  return parsed
+
+
+def parse_shapes(value: str | None) -> list[tuple[int, int]]:
+  if not value:
+    return list(DENSE_DEFAULT_SHAPES)
+  shapes = []
+  for item in value.split(","):
+    item = item.strip()
+    if not item:
+      continue
+    match = re.fullmatch(r"[bB]?(\d+)\s*(?:/|x|X|:|_)\s*[lL]?(\d+)", item)
+    if not match:
+      raise ValueError(
+          f"Invalid shape {item!r}; use forms such as b16/L512, 16x512, or 16:512."
+      )
+    batch, sequence = int(match.group(1)), int(match.group(2))
+    if batch <= 0 or sequence <= 0:
+      raise ValueError(f"Shape values must be positive: {item!r}")
+    shapes.append((batch, sequence))
+  if not shapes:
+    raise ValueError("--shapes did not contain any values.")
+  return shapes
+
+
+def parse_mesh_configs(value: str | None) -> list[tuple[int, int]]:
+  if not value:
+    return list(DENSE_DEFAULT_MESH_CONFIGS)
+  configs = []
+  compact_value = value.replace(" ", "")
+  fsdp_tp_pattern = r"fsdp=(\d+),tp=(\d+)"
+  items = (
+      compact_value.split(";")
+      if ";" in compact_value
+      else [compact_value]
+      if re.fullmatch(fsdp_tp_pattern, compact_value)
+      else compact_value.split(",")
+  )
+  for item in items:
+    item = item.strip()
+    if not item:
+      continue
+    match = (
+        re.fullmatch(r"(\d+)x(\d+)", item)
+        or re.fullmatch(fsdp_tp_pattern, item)
+        or re.fullmatch(r"fsdp(\d+)-tp(\d+)", item)
+    )
+    if not match:
+      raise ValueError(
+          f"Invalid mesh config {item!r}; use forms such as 4x1, fsdp=2,tp=2, or fsdp2-tp2."
+      )
+    fsdp, tp = int(match.group(1)), int(match.group(2))
+    if fsdp <= 0 or tp <= 0:
+      raise ValueError(f"Mesh degrees must be positive: {item!r}")
+    configs.append((fsdp, tp))
+  if not configs:
+    raise ValueError("--mesh-configs did not contain any values.")
+  return configs
+
+
+def default_workloads_for_preset(preset: str) -> set[str]:
+  if preset == "pilot":
+    return set(PILOT_DEFAULT_WORKLOADS)
+  if preset == "dense-synthetic":
+    return set(SYNTHETIC_JAX_WORKLOADS)
+  raise ValueError(f"Unknown preset: {preset}")
 
 
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]], *, append: bool = False) -> None:
@@ -309,14 +449,15 @@ def build_matrix(args: argparse.Namespace) -> list[dict[str, Any]]:
   workloads = (
       parse_csv_values(args.workloads, set(WORKLOADS), "workload")
       if args.workloads
-      else sorted(DEFAULT_WORKLOADS)
+      else sorted(default_workloads_for_preset(args.preset))
   )
+  signatures = build_signatures(args)
   cases = []
   experiment_id = 0
   for repeat_index in range(args.repeats):
     for hardware_target in hardware_targets:
       for workload_family in workloads:
-        for signature in TARGET_SIGNATURES:
+        for signature in signatures:
           cases.append(
               base_case(
                   args=args,
@@ -344,6 +485,11 @@ def validate_matrix(args: argparse.Namespace, cases: list[dict[str, Any]]) -> No
       )
     if case["workload_runner"] == "torch_microbench" and case["backend"] != "gpu":
       raise ValueError(f"{case['case_name']} is a PyTorch GPU workload but backend={case['backend']}.")
+    if case["workload_runner"] == "tunix_cce" and args.preset != "pilot":
+      raise ValueError(
+          f"{case['case_name']} uses cce_train, but dense CCE rows are not implemented. "
+          "Use --preset pilot for CCE profiler cases, or synthetic workloads for dense sweeps."
+      )
 
 
 def select_cases(args: argparse.Namespace, cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -670,10 +816,30 @@ def dstack_command_rows(cases: list[dict[str, Any]], args: argparse.Namespace) -
 
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser()
-  parser.add_argument("--preset", choices=["pilot"], default="pilot")
+  parser.add_argument("--preset", choices=["pilot", "dense-synthetic"], default="pilot")
   parser.add_argument("--hardware-targets", default=None)
   parser.add_argument("--workloads", default=None)
   parser.add_argument("--repeats", type=int, default=1)
+  parser.add_argument(
+      "--shapes",
+      default=None,
+      help="Dense preset shapes, e.g. b16/L512,b16/L1024,b32/L512.",
+  )
+  parser.add_argument(
+      "--mesh-configs",
+      default=None,
+      help="Dense preset mesh configs, e.g. 4x1,2x2,1x4 or fsdp=2,tp=2.",
+  )
+  parser.add_argument(
+      "--token-chunks",
+      default=None,
+      help="Dense preset token chunks, e.g. 64,128,256,512,1024.",
+  )
+  parser.add_argument(
+      "--vocab-chunks",
+      default=None,
+      help="Dense preset vocab chunks, e.g. 4096,8192,16384,32768,65536,131072,262144.",
+  )
   parser.add_argument("--hidden-size", type=int, default=320)
   parser.add_argument("--vocab-size", type=int, default=262144)
   parser.add_argument("--cce-model-size", default="270m")
