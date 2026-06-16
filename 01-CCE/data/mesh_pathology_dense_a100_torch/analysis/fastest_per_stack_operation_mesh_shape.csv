@@ -1,0 +1,10 @@
+hardware_target,execution_stack,operation_family,shape,mesh_configuration,chunk_configuration,token_loop_count,vocab_loop_count,chunk_loop_count,steady_state_mean_step_time_sec,tokens_per_sec,hbm_gib
+gpu-a100-80gb-4,PyTorch eager,chunked_matmul_loop,b16/L512,"fsdp=1,tp=4",1024/262144,8,1,8,0.0328713046386838,249214.32507912826,2.865890816
+gpu-a100-80gb-4,PyTorch eager,chunked_matmul_loop,b16/L512,"fsdp=2,tp=2",128/262144,64,1,64,0.03813899718225002,214793.2721160423,0.517080576
+gpu-a100-80gb-4,PyTorch eager,chunked_matmul_loop,b16/L512,"fsdp=4,tp=1",1024/65536,8,4,32,0.03413379024714232,239996.78736778538,0.852624896
+gpu-a100-80gb-4,PyTorch eager,collective_loop,b16/L512,"fsdp=1,tp=4",1024/131072,8,2,16,0.052670060005038974,155534.28264969256,1.07374848
+gpu-a100-80gb-4,PyTorch eager,collective_loop,b16/L512,"fsdp=2,tp=2",256/262144,32,1,32,0.047017567045986655,174232.74989936463,0.53687552
+gpu-a100-80gb-4,PyTorch eager,collective_loop,b16/L512,"fsdp=4,tp=1",1024/32768,8,8,64,0.018714968906715514,437724.4782416099,0.2013312
+gpu-a100-80gb-4,PyTorch eager,projection_collective_loop,b16/L512,"fsdp=1,tp=4",1024/65536,8,4,32,0.06705738715827465,122164.02020950403,0.852624896
+gpu-a100-80gb-4,PyTorch eager,projection_collective_loop,b16/L512,"fsdp=2,tp=2",512/262144,16,1,16,0.05730930571444333,142943.62665669876,1.523713536
+gpu-a100-80gb-4,PyTorch eager,projection_collective_loop,b16/L512,"fsdp=4,tp=1",1024/16384,8,16,128,0.03856204603798687,212436.86063571906,0.349308416

@@ -269,6 +269,23 @@ def recovery_table(success: pd.DataFrame, outdir: Path) -> Path | None:
   if success.empty:
     return None
   rows: list[dict[str, Any]] = []
+  cols = [
+      "hardware_target",
+      "execution_stack",
+      "operation_family",
+      "shape",
+      "mesh_configuration",
+      "slow_chunk",
+      "fast_chunk",
+      "slow_loop_count",
+      "fast_loop_count",
+      "slow_step_time_sec",
+      "fast_step_time_sec",
+      "recovered_speedup",
+      "slow_hbm_gib",
+      "fast_hbm_gib",
+      "hbm_relative_increase",
+  ]
   group_cols = [
       "hardware_target",
       "execution_stack",
@@ -314,7 +331,10 @@ def recovery_table(success: pd.DataFrame, outdir: Path) -> Path | None:
         "hbm_relative_increase": hbm_increase,
     })
   path = outdir / "recovery_report.csv"
-  write_csv(path, rows)
+  if rows:
+    write_csv(path, rows)
+  else:
+    pd.DataFrame(columns=cols).to_csv(path, index=False)
   return path
 
 

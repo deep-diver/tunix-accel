@@ -1,0 +1,4 @@
+hardware_target,execution_stack,operation_family,status,rows
+gpu-a100-80gb-4,PyTorch eager,chunked_matmul_loop,success,14
+gpu-a100-80gb-4,PyTorch eager,collective_loop,success,13
+gpu-a100-80gb-4,PyTorch eager,projection_collective_loop,success,13

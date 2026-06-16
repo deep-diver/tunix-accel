@@ -1,0 +1,13 @@
+hardware_target,execution_stack,operation_family,shape,mesh_configuration,chunk_configuration,token_loop_count,vocab_loop_count,chunk_loop_count,steady_state_mean_step_time_sec,relative_to_best_same_group,outlier_band,hbm_gib
+gpu-a100-80gb-4,PyTorch eager,projection_collective_loop,b16/L512,"fsdp=1,tp=4",64/4096,128,64,8192,1.6494622909929604,24.597771563925637,>=10x,0.184157696
+gpu-a100-80gb-4,PyTorch eager,chunked_matmul_loop,b16/L512,"fsdp=4,tp=1",64/4096,128,64,8192,0.7926136719062924,23.22079283218921,>=10x,0.184157696
+gpu-a100-80gb-4,PyTorch eager,collective_loop,b16/L512,"fsdp=1,tp=4",64/8192,128,32,4096,0.6720477906987071,12.759578983475848,>=10x,0.004197376
+gpu-a100-80gb-4,PyTorch eager,collective_loop,b16/L512,"fsdp=4,tp=1",128/4096,64,64,4096,0.1805462684482336,9.647158344112876,>=5x,0.0031488
+gpu-a100-80gb-4,PyTorch eager,projection_collective_loop,b16/L512,"fsdp=1,tp=4",128/8192,64,32,2048,0.4077152826357633,6.08009497407703,>=5x,0.19293952
+gpu-a100-80gb-4,PyTorch eager,chunked_matmul_loop,b16/L512,"fsdp=1,tp=4",64/16384,128,16,2048,0.19866935564205052,6.043853684111196,>=5x,0.19293952
+gpu-a100-80gb-4,PyTorch eager,chunked_matmul_loop,b16/L512,"fsdp=4,tp=1",128/8192,64,32,2048,0.20440992675721645,5.98849191013382,>=5x,0.19293952
+gpu-a100-80gb-4,PyTorch eager,projection_collective_loop,b16/L512,"fsdp=4,tp=1",256/4096,32,64,2048,0.19193800995126367,4.977381380702376,>=2x,0.19293952
+gpu-a100-80gb-4,PyTorch eager,projection_collective_loop,b16/L512,"fsdp=2,tp=2",64/32768,128,8,1024,0.21176061029545962,3.6950475608726636,>=2x,0.202507776
+gpu-a100-80gb-4,PyTorch eager,collective_loop,b16/L512,"fsdp=1,tp=4",128/16384,64,16,1024,0.17269234349951149,3.278757295567727,>=2x,0.0167808
+gpu-a100-80gb-4,PyTorch eager,collective_loop,b16/L512,"fsdp=4,tp=1",256/8192,32,32,1024,0.05149955973029137,2.751784413160939,>=2x,0.012586496
+gpu-a100-80gb-4,PyTorch eager,chunked_matmul_loop,b16/L512,"fsdp=2,tp=2",512/4096,16,64,1024,0.09382827300578356,2.460166232410837,>=2x,0.202507776
