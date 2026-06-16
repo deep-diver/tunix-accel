@@ -38,6 +38,10 @@ PyTorch eager reproduces the small-chunk slowdown without XLA.
 | projection + collective loop | JAX/XLA | 0.1742 | 0.0454 | 3.84x |
 | projection + collective loop | PyTorch eager | 0.4023 | 0.0618 | 6.51x |
 
+Composite view:
+
+![A100 composite glyph matrix](data/mesh_pathology_a100_xla_vs_torch/analysis/a100_composite_glyph_matrix_xla_vs_torch.png)
+
 ![A100 step time by operation and stack](data/mesh_pathology_a100_xla_vs_torch/analysis/a100_step_time_by_operation_stack.png)
 
 ![A100 bad/good slowdown](data/mesh_pathology_a100_xla_vs_torch/analysis/a100_bad_good_slowdown_xla_vs_torch.png)

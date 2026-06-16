@@ -411,6 +411,166 @@ def plot_scatter_views(data: pd.DataFrame, outdir: Path) -> list[Path]:
   ]
 
 
+def plot_composite_glyph_matrix(data: pd.DataFrame, outdir: Path) -> Path:
+  success = successful_rows_with_relative_time(data)
+  success_lookup = {}
+  for _, row in success.iterrows():
+    success_lookup[(
+        str(row["execution_stack"]),
+        str(row["operation_family"]),
+        str(row["signature_label"]),
+    )] = float(row["relative_step_time"])
+  failure_lookup = {}
+  for _, row in data[~data["status"].eq("success")].iterrows():
+    failure_lookup[(
+        str(row.get("execution_stack", "")),
+        str(row.get("operation_family", "")),
+        str(row.get("signature_label", "")),
+    )] = str(row.get("failure_type", "failure") or "failure")
+
+  finite = list(success_lookup.values())
+  vmax = max(1.0, max(finite) if finite else 1.0)
+  fig, ax = plt.subplots(figsize=(12.4, 6.8))
+  cell_height = 1.0
+  bar_width = 0.16
+  bar_gap = 0.09
+  bar_base = 0.13
+  bar_max_height = 0.62
+
+  for operation_index, operation in enumerate(OPERATION_ORDER):
+    y0 = len(OPERATION_ORDER) - 1 - operation_index
+    for signature_index, signature in enumerate(SIGNATURE_ORDER):
+      x0 = signature_index
+      rect = plt.Rectangle(
+          (x0, y0),
+          1.0,
+          cell_height,
+          facecolor="#FAFAFA",
+          edgecolor="#D7D7D7",
+          linewidth=0.9,
+      )
+      ax.add_patch(rect)
+      ax.text(
+          x0 + 0.5,
+          y0 + 0.94,
+          f"loops={2048 if signature != 'good' else 64}",
+          ha="center",
+          va="top",
+          fontsize=7.5,
+          color="#666666",
+      )
+      for stack_index, stack in enumerate(STACK_ORDER):
+        key = (stack, operation, signature)
+        bar_x = x0 + 0.18 + stack_index * (bar_width + bar_gap)
+        center_x = bar_x + bar_width / 2
+        if key in success_lookup:
+          value = success_lookup[key]
+          height = (value / vmax) * bar_max_height
+          ax.add_patch(
+              plt.Rectangle(
+                  (bar_x, y0 + bar_base),
+                  bar_width,
+                  height,
+                  facecolor=STACK_COLORS[stack],
+                  edgecolor="#2A2A2A",
+                  linewidth=0.7,
+                  alpha=0.9,
+              )
+          )
+          ax.text(
+              center_x,
+              y0 + bar_base + height + 0.035,
+              f"{value:.1f}x",
+              ha="center",
+              va="bottom",
+              fontsize=7.5,
+              color="#222222",
+          )
+        elif key in failure_lookup:
+          ax.plot(
+              [center_x],
+              [y0 + bar_base + bar_max_height * 0.5],
+              marker="x",
+              markersize=8,
+              markeredgewidth=1.7,
+              color=STACK_COLORS[stack],
+          )
+          ax.text(
+              center_x,
+              y0 + bar_base + 0.02,
+              "fail",
+              ha="center",
+              va="bottom",
+              fontsize=7,
+              color="#555555",
+              rotation=90,
+          )
+        else:
+          ax.plot(
+              [bar_x, bar_x + bar_width],
+              [y0 + bar_base + 0.05, y0 + bar_base + 0.05],
+              color="#A8A8A8",
+              linewidth=2.0,
+          )
+          ax.text(
+              center_x,
+              y0 + bar_base + 0.11,
+              "n/a",
+              ha="center",
+              va="bottom",
+              fontsize=7,
+              color="#777777",
+              rotation=90,
+          )
+
+  ax.set_xlim(0, len(SIGNATURE_ORDER))
+  ax.set_ylim(0, len(OPERATION_ORDER))
+  ax.set_xticks([index + 0.5 for index in range(len(SIGNATURE_ORDER))])
+  ax.set_xticklabels([SIGNATURE_LABELS[signature] for signature in SIGNATURE_ORDER])
+  ax.set_yticks([len(OPERATION_ORDER) - index - 0.5 for index in range(len(OPERATION_ORDER))])
+  ax.set_yticklabels([operation.replace("_loop", "").replace("_", " ") for operation in OPERATION_ORDER])
+  ax.set_xlabel("mesh/chunk signature")
+  ax.set_ylabel("operation")
+  ax.set_title(
+      "A100 composite glyph matrix: stack, operation, signature, slowdown, and status\n"
+      "Bar height is relative step time vs good 2x2 within the same stack and operation",
+      pad=12,
+  )
+  ax.tick_params(axis="both", length=0)
+  for spine in ax.spines.values():
+    spine.set_visible(False)
+
+  stack_handles = [
+      plt.Line2D(
+          [0],
+          [0],
+          color=STACK_COLORS[stack],
+          marker="s",
+          linestyle="",
+          label=stack,
+          markersize=9,
+      )
+      for stack in STACK_ORDER
+  ]
+  status_handles = [
+      plt.Line2D([0], [0], color="#333333", marker="x", linestyle="", label="attempted failure"),
+      plt.Line2D([0], [0], color="#A8A8A8", linewidth=2, label="not started / n/a"),
+  ]
+  ax.legend(
+      handles=stack_handles + status_handles,
+      loc="upper center",
+      bbox_to_anchor=(0.5, -0.08),
+      ncol=5,
+      frameon=False,
+      fontsize=9,
+  )
+  fig.tight_layout()
+  path = outdir / "a100_composite_glyph_matrix_xla_vs_torch.png"
+  fig.savefig(path, dpi=190, bbox_inches="tight")
+  plt.close(fig)
+  return path
+
+
 def normalized_value_grid(data: pd.DataFrame) -> tuple[np.ndarray, dict[tuple[str, str, str], str]]:
   success = data[
       data["status"].eq("success") & data["steady_state_mean_step_time_sec"].notna()
@@ -599,6 +759,7 @@ def main() -> None:
       plot_bad_good(ratios, outdir),
       plot_normalized_heatmap(data, outdir),
       *plot_scatter_views(data, outdir),
+      plot_composite_glyph_matrix(data, outdir),
       plot_layered_3d_heatmap(data, outdir),
   ]
   report = write_report(outdir=outdir, data=data, ratios=ratios, failures=failures, plots=plots)
