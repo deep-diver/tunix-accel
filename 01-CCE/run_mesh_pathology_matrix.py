@@ -22,6 +22,7 @@ import math
 import os
 from pathlib import Path
 import re
+import signal
 import shutil
 import socket
 import subprocess
@@ -533,6 +534,51 @@ def parse_failure(log_path: Path) -> dict[str, Any]:
   }
 
 
+def run_subprocess(
+    command: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    log: Any,
+    timeout_sec: int,
+) -> tuple[subprocess.CompletedProcess, bool]:
+  """Run a command and kill the whole process group on timeout."""
+  timeout = timeout_sec if timeout_sec > 0 else None
+  proc = subprocess.Popen(
+      command,
+      cwd=cwd,
+      env=env,
+      stdout=log,
+      stderr=subprocess.STDOUT,
+      start_new_session=True,
+  )
+  try:
+    returncode = proc.wait(timeout=timeout)
+    return subprocess.CompletedProcess(command, returncode=returncode), False
+  except subprocess.TimeoutExpired:
+    log.write(f"\nTIMEOUT after {timeout_sec} seconds; terminating process group\n")
+    log.flush()
+    try:
+      os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+      pass
+    except Exception:
+      proc.terminate()
+    try:
+      proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+      log.write("Process group did not exit after SIGTERM; sending SIGKILL\n")
+      log.flush()
+      try:
+        os.killpg(proc.pid, signal.SIGKILL)
+      except ProcessLookupError:
+        pass
+      except Exception:
+        proc.kill()
+      proc.wait()
+    return subprocess.CompletedProcess(command, returncode=124), True
+
+
 def run_case(args: argparse.Namespace, case: dict[str, Any]) -> dict[str, Any]:
   run_dir = Path(case["run_dir"])
   if run_dir.exists() and args.force:
@@ -556,21 +602,13 @@ def run_case(args: argparse.Namespace, case: dict[str, Any]) -> dict[str, Any]:
   with log_path.open("w") as log:
     log.write("$ " + " ".join(command) + "\n")
     log.flush()
-    try:
-      proc = subprocess.run(
-          command,
-          cwd=REPO_ROOT,
-          env=configure_env(args, case),
-          stdout=log,
-          stderr=subprocess.STDOUT,
-          check=False,
-          timeout=args.case_timeout_sec if args.case_timeout_sec > 0 else None,
-      )
-      timed_out = False
-    except subprocess.TimeoutExpired:
-      timed_out = True
-      proc = subprocess.CompletedProcess(command, returncode=124)
-      log.write(f"\nTIMEOUT after {args.case_timeout_sec} seconds\n")
+    proc, timed_out = run_subprocess(
+        command,
+        cwd=REPO_ROOT,
+        env=configure_env(args, case),
+        log=log,
+        timeout_sec=args.case_timeout_sec,
+    )
   elapsed = time.monotonic() - started
 
   row = {

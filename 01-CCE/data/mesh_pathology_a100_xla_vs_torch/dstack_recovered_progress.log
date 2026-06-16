@@ -1,0 +1,37 @@
+jax 0.10.1 backend gpu devices [CudaDevice(id=0), CudaDevice(id=1), CudaDevice(id=2), CudaDevice(id=3)]
+torch 2.6.0+cu124 cuda 12.4 devices 4
+total_experiments=24 selected_experiments=24
+results_jsonl=/tmp/mesh-pathology-gpu-a100-pytorch/results/shard_0.jsonl
+run 1/24 experiment_id=0 exp0000_gpu-a100-80gb-4_torch_eager_chunked_matmul_loop_bad_fsdp2_tp2_tc128_vc8192_r0
+done success experiment_id=0 step_s=0.18134850026108323
+run 2/24 experiment_id=1 exp0001_gpu-a100-80gb-4_torch_eager_chunked_matmul_loop_good_fsdp2_tp2_tc512_vc65536_r0
+done success experiment_id=1 step_s=0.036323516210541126
+run 3/24 experiment_id=2 exp0002_gpu-a100-80gb-4_torch_eager_chunked_matmul_loop_control-fsdp4-tp1_fsdp4_tp1_tc128_vc8192_r0
+done success experiment_id=2 step_s=0.1844274393748492
+run 4/24 experiment_id=3 exp0003_gpu-a100-80gb-4_torch_eager_chunked_matmul_loop_control-fsdp1-tp4_fsdp1_tp4_tc128_vc8192_r0
+done success experiment_id=3 step_s=0.1950188721064478
+run 5/24 experiment_id=4 exp0004_gpu-a100-80gb-4_torch_eager_collective_loop_bad_fsdp2_tp2_tc128_vc8192_r0
+done success experiment_id=4 step_s=0.3262595245614648
+run 6/24 experiment_id=5 exp0005_gpu-a100-80gb-4_torch_eager_collective_loop_good_fsdp2_tp2_tc512_vc65536_r0
+done success experiment_id=5 step_s=0.04927776278927922
+run 7/24 experiment_id=6 exp0006_gpu-a100-80gb-4_torch_eager_collective_loop_control-fsdp4-tp1_fsdp4_tp1_tc128_vc8192_r0
+done success experiment_id=6 step_s=0.08464664183557033
+run 8/24 experiment_id=7 exp0007_gpu-a100-80gb-4_torch_eager_collective_loop_control-fsdp1-tp4_fsdp1_tp4_tc128_vc8192_r0
+done success experiment_id=7 step_s=0.32996717100031675
+run 9/24 experiment_id=8 exp0008_gpu-a100-80gb-4_torch_eager_projection_collective_loop_bad_fsdp2_tp2_tc128_vc8192_r0
+done success experiment_id=8 step_s=0.4022775367833674
+run 10/24 experiment_id=9 exp0009_gpu-a100-80gb-4_torch_eager_projection_collective_loop_good_fsdp2_tp2_tc512_vc65536_r0
+done success experiment_id=9 step_s=0.06177992401644587
+run 11/24 experiment_id=10 exp0010_gpu-a100-80gb-4_torch_eager_projection_collective_loop_control-fsdp4-tp1_fsdp4_tp1_tc128_vc8192_r0
+done success experiment_id=10 step_s=0.1802385926246643
+run 12/24 experiment_id=11 exp0011_gpu-a100-80gb-4_torch_eager_projection_collective_loop_control-fsdp1-tp4_fsdp1_tp4_tc128_vc8192_r0
+done success experiment_id=11 step_s=0.407029149774462
+run 13/24 experiment_id=12 exp0012_gpu-a100-80gb-4_torch_compile_chunked_matmul_loop_bad_fsdp2_tp2_tc128_vc8192_r0
+done failure experiment_id=12 step_s=None
+run 14/24 experiment_id=13 exp0013_gpu-a100-80gb-4_torch_compile_chunked_matmul_loop_good_fsdp2_tp2_tc512_vc65536_r0
+done failure experiment_id=13 step_s=None
+run 15/24 experiment_id=14 exp0014_gpu-a100-80gb-4_torch_compile_chunked_matmul_loop_control-fsdp4-tp1_fsdp4_tp1_tc128_vc8192_r0
+done failure experiment_id=14 step_s=None
+run 16/24 experiment_id=15 exp0015_gpu-a100-80gb-4_torch_compile_chunked_matmul_loop_control-fsdp1-tp4_fsdp1_tp4_tc128_vc8192_r0
+done failure experiment_id=15 step_s=None
+run 17/24 experiment_id=16 exp0016_gpu-a100-80gb-4_torch_compile_collective_loop_bad_fsdp2_tp2_tc128_vc8192_r0

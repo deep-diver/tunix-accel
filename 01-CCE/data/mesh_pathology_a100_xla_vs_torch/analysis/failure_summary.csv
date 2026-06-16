@@ -1,0 +1,6 @@
+experiment_id,operation_family,execution_stack,signature_label,status,failure_type,error_message
+12,chunked_matmul_loop,torch.compile,bad,failure,runner_failure,Runner recorded status=failure before the dstack run was aborted; per-case runner.log was unavailable after abort.
+13,chunked_matmul_loop,torch.compile,good,failure,runner_failure,Runner recorded status=failure before the dstack run was aborted; per-case runner.log was unavailable after abort.
+14,chunked_matmul_loop,torch.compile,control-fsdp4-tp1,failure,runner_failure,Runner recorded status=failure before the dstack run was aborted; per-case runner.log was unavailable after abort.
+15,chunked_matmul_loop,torch.compile,control-fsdp1-tp4,failure,runner_failure,Runner recorded status=failure before the dstack run was aborted; per-case runner.log was unavailable after abort.
+16,collective_loop,torch.compile,bad,failure,aborted_hang,Run was manually aborted after no new progress while this case was running.
